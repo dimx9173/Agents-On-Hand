@@ -1,4 +1,12 @@
+# === Agents-On-Hand project-specific ===
+*.log
+*.xml
+response.xml
+bitbucket.log
+.agents-on-hand/
+
 # Byte-compiled / optimized / DLL files
+
 __pycache__/
 *.py[codz]
 *$py.class

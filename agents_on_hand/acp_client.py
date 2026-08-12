@@ -55,7 +55,7 @@ class ACPClient:
                 "protocolVersion": 1,
                 "clientInfo": {"name": "AgentsOnHand", "version": "1.0"},
             },
-            timeout=2.0,
+            timeout=8.0,
         )
 
         logger.info(f"ACP Initialize handshake successful: {init_res}")
@@ -67,7 +67,7 @@ class ACPClient:
                 "cwd": str(self.working_dir),
                 "mcpServers": [],
             },
-            timeout=3.0,
+            timeout=10.0,
         )
 
         if isinstance(sess_res, dict) and "sessionId" in sess_res:

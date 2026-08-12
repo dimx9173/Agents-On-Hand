@@ -69,17 +69,29 @@ class PiRPCDriver(BaseDriver):
         self.emit_event(DriverEvent(DriverEvent.EXIT, exit_code=0))
 
     def _handle_json_msg(self, data: dict):
-        """Parse incoming JSON events from Pi RPC."""
+        """Parse incoming JSON events from Pi RPC.
+
+        Pi Agent --mode rpc format:
+        - {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "..."}}
+        - {"type": "message_update", "assistantMessageEvent": {"type": "thinking_delta", "delta": "..."}}
+        - {"type": "extension_ui_request", "id": ..., "method": ..., "statusText": ...}
+        - {"type": "turn_end", ...}
+        """
         msg_type = data.get("type", "")
-        
-        if msg_type in ("text_delta", "content_block_delta", "message_delta"):
-            text = data.get("text", "") or data.get("delta", "") or data.get("content", "")
-            if text:
-                self.emit_event(DriverEvent(DriverEvent.TEXT_DELTA, content=str(text)))
-        elif msg_type in ("thought_delta", "thinking"):
-            text = data.get("text", "") or data.get("thought", "")
-            if text:
-                self.emit_event(DriverEvent(DriverEvent.THOUGHT_DELTA, content=str(text)))
+
+        if msg_type == "message_update":
+            # Unwrap assistantMessageEvent
+            evt = data.get("assistantMessageEvent", {})
+            if not isinstance(evt, dict):
+                return
+            evt_type = evt.get("type", "")
+            delta = evt.get("delta", "")
+
+            if evt_type == "text_delta" and delta:
+                self.emit_event(DriverEvent(DriverEvent.TEXT_DELTA, content=str(delta)))
+            elif evt_type in ("thinking_delta", "thinking") and delta:
+                self.emit_event(DriverEvent(DriverEvent.THOUGHT_DELTA, content=str(delta)))
+
         elif msg_type == "extension_ui_request":
             req_id = data.get("id", "")
             tool_name = data.get("method", "Tool Approval")
@@ -92,8 +104,16 @@ class PiRPCDriver(BaseDriver):
                     tool_args={"info": status_text},
                 )
             )
-        elif "text" in data:
-            self.emit_event(DriverEvent(DriverEvent.TEXT_DELTA, content=str(data["text"])))
+
+        elif msg_type == "turn_end":
+            # Turn is complete, no action needed — text was already emitted via text_delta events
+            pass
+
+        elif msg_type == "agent_end":
+            self.is_running = False
+            self.emit_event(DriverEvent(DriverEvent.EXIT, exit_code=0))
+
+
 
     def send_prompt(self, text: str):
         """Send prompt JSON message to pi stdio stdin."""

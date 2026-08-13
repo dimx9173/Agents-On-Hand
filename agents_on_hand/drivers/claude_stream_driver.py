@@ -16,7 +16,12 @@ class ClaudeStreamDriver(BaseDriver):
     """Protocol Driver for Claude Code running with --output-format=stream-json."""
 
     def __init__(self, command: str, working_dir: Path):
-        cmd = command if "--output-format=stream-json" in command else f"{command} -p --output-format=stream-json"
+        if "--output-format=stream-json" not in command:
+            cmd = f"{command} -p --verbose --output-format=stream-json"
+        elif "--verbose" not in command:
+            cmd = command.replace("-p", "-p --verbose")
+        else:
+            cmd = command
         super().__init__(cmd, working_dir)
         self.process: Optional[asyncio.subprocess.Process] = None
         self._read_task: Optional[asyncio.Task] = None
@@ -70,17 +75,36 @@ class ClaudeStreamDriver(BaseDriver):
         """Parse incoming stream-json events from Claude Code."""
         msg_type = data.get("type", "")
 
-        if msg_type in ("text", "content_block_delta"):
+        if msg_type == "assistant":
+            msg = data.get("message", {})
+            content = msg.get("content", [])
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict):
+                        b_type = item.get("type")
+                        if b_type == "text" and item.get("text"):
+                            self.emit_event(DriverEvent(DriverEvent.TEXT_DELTA, content=item["text"]))
+                        elif b_type in ("thinking", "thought") and item.get("thinking"):
+                            self.emit_event(DriverEvent(DriverEvent.THOUGHT_DELTA, content=item["thinking"]))
+
+        elif msg_type == "result":
+            res_text = data.get("result")
+            if res_text and isinstance(res_text, str):
+                self.emit_event(DriverEvent(DriverEvent.TEXT_DELTA, content=res_text))
+
+        elif msg_type in ("text", "content_block_delta"):
             delta = data.get("delta", {})
             text = delta.get("text", "") if isinstance(delta, dict) else str(delta)
             if not text:
                 text = data.get("text", "")
             if text:
                 self.emit_event(DriverEvent(DriverEvent.TEXT_DELTA, content=str(text)))
+
         elif msg_type in ("thinking", "thought"):
             text = data.get("thinking", "") or data.get("text", "")
             if text:
                 self.emit_event(DriverEvent(DriverEvent.THOUGHT_DELTA, content=str(text)))
+
         elif msg_type == "tool_use":
             tool_name = data.get("name", "Tool")
             tool_args = data.get("input", {})

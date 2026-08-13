@@ -8,6 +8,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-08-13
+
+### Added
+- **Centralized logging** (`logging_setup.py`): rotating file log (`~/.agents-on-hand/aoh.log`), colored console output, and a security sanitizer that redacts bot tokens / API keys before records reach handlers.
+- **ACP stdio buffer-overrun recovery**: oversized JSON lines (`asyncio.LimitOverrunError`) are drained and skipped instead of killing the read loop.
+- **Per-turn Telegram message**: each new prompt starts a fresh streaming message instead of appending to the previous one.
+- **Pi RPC**: stderr drained to prevent pipe-buffer deadlock; `EXIT` now carries the real process exit code; only interactive UI methods (`confirm`, `select`, `input`, `editor`) surface as tool requests.
+- **Claude Stream**: `--verbose` flag handling and parsing of assistant message content blocks.
+
+### Fixed
+- **Streaming completeness**: trailing text deltas dropped by the edit throttle are now guaranteed a final flush — Telegram no longer shows truncated agent replies (e.g. OMP showing only the first chunk).
+- **Markdown fallback**: Telegram `BadRequest` parse failures on send/edit are retried as plain text instead of being silently swallowed.
+- **Pi RPC event parsing**: message event parsing no longer misreads turn completion as session exit.
+
+### Tests
+- Added `test_stream_completeness.py` (trailing flush, Markdown fallback, new-message-per-prompt) and parallel multi-agent integration tests.
+
 ## [1.0.0] — 2026-08-12
 
 ### Added

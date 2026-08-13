@@ -57,6 +57,8 @@ class UnifiedStreamer:
         self._last_edit_time: float = 0.0
         self._typing_task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
+        self._trailing_flush_task: Optional[asyncio.Task] = None
+        self._wait_indicator_task: Optional[asyncio.Task] = None
 
     def start(self):
         """Start listening to driver events."""
@@ -67,12 +69,51 @@ class UnifiedStreamer:
         """Stop streamer and typing indicator."""
         self._is_active = False
         self._stop_typing()
+        self._cancel_trailing_flush()
+        self._cancel_wait_indicator()
         self.session.unregister_listener(self._on_driver_event)
 
     def notify_user_input(self):
-        """Trigger top typing indicator when user sends a prompt."""
+        """Trigger top typing indicator when user sends a prompt.
+
+        A new prompt starts a new Telegram message: flush the previous turn's
+        accumulated text to its own message, then reset streaming state.
+        """
+        if self.current_msg_id is not None and (self.current_text or self.current_thought):
+            self._cancel_trailing_flush()
+            asyncio.create_task(
+                self._flush_previous_turn(
+                    self.current_text, self.current_thought, self.current_msg_id
+                )
+            )
+        self.current_text = ""
+        self.current_thought = ""
+        self.current_msg_id = None
+        self._cancel_wait_indicator()
+
         if self._typing_task is None or self._typing_task.done():
             self._typing_task = asyncio.create_task(self._typing_loop())
+
+        self._wait_indicator_task = asyncio.create_task(self._wait_indicator_loop())
+
+    async def _wait_indicator_loop(self):
+        """Show initial waiting message if model takes >4s to respond."""
+        try:
+            await asyncio.sleep(4.0)
+            async with self._lock:
+                if not self.current_text and not self.current_thought and self._is_active:
+                    waiting_msg = "⏳ *Agent 正在思考與處理中，請稍候...*"
+                    self.current_msg_id = await self._deliver(waiting_msg, self.current_msg_id)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.debug(f"Error in wait indicator loop: {e}")
+
+    def _cancel_wait_indicator(self):
+        """Cancel pending waiting indicator task."""
+        if self._wait_indicator_task and not self._wait_indicator_task.done():
+            self._wait_indicator_task.cancel()
+        self._wait_indicator_task = None
 
     async def _typing_loop(self):
         """Periodically send Telegram typing status every 4s while processing."""
@@ -90,6 +131,7 @@ class UnifiedStreamer:
 
     def _on_driver_event(self, event: Any):
         """Callback when a DriverEvent arrives from the active AgentSession."""
+        self._cancel_wait_indicator()
         if isinstance(event, str):
             # Raw string fallback
             self.current_text += event
@@ -140,46 +182,122 @@ class UnifiedStreamer:
             )
         )
 
+    def _cancel_trailing_flush(self):
+        """Cancel any pending trailing flush task."""
+        if self._trailing_flush_task and not self._trailing_flush_task.done():
+            self._trailing_flush_task.cancel()
+        self._trailing_flush_task = None
+
     async def _schedule_edit(self):
-        """Throttle and edit Telegram message."""
+        """Throttle and edit Telegram message.
+
+        Edits arriving inside the throttle window are not dropped: a single
+        trailing flush task is (re)scheduled so the final state of the
+        accumulated text always reaches Telegram.
+        """
         async with self._lock:
             now = asyncio.get_running_loop().time()
-            if now - self._last_edit_time < self.edit_interval:
+            remaining = self.edit_interval - (now - self._last_edit_time)
+            if remaining > 0:
+                if self._trailing_flush_task is None or self._trailing_flush_task.done():
+                    self._trailing_flush_task = asyncio.create_task(
+                        self._trailing_flush(remaining)
+                    )
                 return
 
-            self._last_edit_time = now
+            await self._flush_edit_locked()
 
-            full_content = self.current_text
-            if self.current_thought:
-                thought_block = f"💭 *Thinking...*\n```\n{self.current_thought.strip()}\n```\n\n"
-                full_content = thought_block + full_content
+    async def _trailing_flush(self, delay: float):
+        """Wait out the throttle window, then push the final accumulated text."""
+        try:
+            await asyncio.sleep(delay)
+            async with self._lock:
+                if not self._is_active:
+                    return
+                await self._flush_edit_locked()
+        except asyncio.CancelledError:
+            pass
 
-            formatted = format_hermes_style(full_content)
-            if not formatted.strip():
-                return
+    @staticmethod
+    def _render_content(text: str, thought: str) -> str:
+        """Render accumulated text/thought into Telegram-ready Markdown."""
+        full_content = text
+        if thought:
+            thought_block = f"💭 *Thinking...*\n```\n{thought.strip()}\n```\n\n"
+            full_content = thought_block + full_content
+        return format_hermes_style(full_content)
 
-            if self.current_msg_id is None:
+    async def _deliver(self, formatted: str, msg_id: Optional[int]) -> Optional[int]:
+        """Send or edit the Telegram message with Markdown fallback.
+
+        Returns the message_id of the streaming message, or None on failure.
+        """
+        if msg_id is None:
+            try:
+                msg = await self.bot.send_message(
+                    chat_id=self.chat_id,
+                    text=formatted,
+                    parse_mode="Markdown",
+                )
+                return msg.message_id
+            except BadRequest:
+                # Markdown parse failure: retry as plain text
                 try:
                     msg = await self.bot.send_message(
                         chat_id=self.chat_id,
                         text=formatted,
-                        parse_mode="Markdown",
                     )
-                    self.current_msg_id = msg.message_id
+                    return msg.message_id
                 except Exception as e:
-                    logger.debug(f"Error creating initial streaming msg: {e}")
-            else:
-                try:
-                    await self.bot.edit_message_text(
-                        chat_id=self.chat_id,
-                        message_id=self.current_msg_id,
-                        text=formatted,
-                        parse_mode="Markdown",
-                    )
-                except BadRequest:
-                    pass
-                except Exception as e:
-                    logger.debug(f"Error editing streaming msg: {e}")
+                    logger.debug(f"Error creating initial streaming msg (plain retry): {e}")
+            except Exception as e:
+                logger.debug(f"Error creating initial streaming msg: {e}")
+            return None
+
+        try:
+            await self.bot.edit_message_text(
+                chat_id=self.chat_id,
+                message_id=msg_id,
+                text=formatted,
+                parse_mode="Markdown",
+            )
+        except BadRequest as e:
+            if "not modified" in str(e).lower():
+                return msg_id
+            # Markdown parse failure: retry as plain text
+            try:
+                await self.bot.edit_message_text(
+                    chat_id=self.chat_id,
+                    message_id=msg_id,
+                    text=formatted,
+                )
+            except BadRequest as retry_err:
+                if "not modified" not in str(retry_err).lower():
+                    logger.debug(f"Error editing streaming msg (plain retry): {retry_err}")
+            except Exception as retry_err:
+                logger.debug(f"Error editing streaming msg (plain retry): {retry_err}")
+        except Exception as e:
+            logger.debug(f"Error editing streaming msg: {e}")
+        return msg_id
+
+    async def _flush_previous_turn(self, text: str, thought: str, msg_id: int):
+        """Best-effort final edit of the previous turn's message before reset."""
+        try:
+            formatted = self._render_content(text, thought)
+            if formatted.strip():
+                await self._deliver(formatted, msg_id)
+        except Exception as e:
+            logger.debug(f"Error flushing previous turn: {e}")
+
+    async def _flush_edit_locked(self):
+        """Render and send/edit the Telegram message. Caller must hold the lock."""
+        self._last_edit_time = asyncio.get_running_loop().time()
+
+        formatted = self._render_content(self.current_text, self.current_thought)
+        if not formatted.strip():
+            return
+
+        self.current_msg_id = await self._deliver(formatted, self.current_msg_id)
 
 
 # Compatibility Aliases for bot.py and tests

@@ -32,11 +32,9 @@ from .stream_handler import DirectChatStreamer
 from .acp_streamer import ACPStreamer
 from .ansi_cleaner import format_telegram_code_block
 
-# Set up logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+# Logging is configured centrally in main.py via agents_on_hand.logging_setup.setup_logging()
 logger = logging.getLogger("AgentsOnHand")
+
 
 # Active streamer instances per user_id
 active_streamers: Dict[int, Any] = {}
@@ -383,12 +381,57 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
             await query.message.reply_text("❌ 該 Session 已不存在。")
             return
         
+        # If previous active session is running and user is switching away, set background completion callback
+        prev_session = session_manager.get_active_session(user_id)
+        if prev_session and prev_session.session_id != session_id and prev_session.is_running:
+            def _make_bg_done_cb(bg_sess_id: str, bg_agent_name: str, target_chat_id: int):
+                def _on_bg_done(s: Any):
+                    if not bot_app:
+                        return
+                    logs = s.get_last_n_lines(n=10).strip()
+                    summary = logs[-200:] if len(logs) > 200 else logs
+                    if not summary:
+                        summary = "(無文字內容)"
+
+                    alert_text = (
+                        f"✅ *{bg_agent_name} 回覆完成*\n"
+                        f"🆔 Session: `{bg_sess_id}`\n\n"
+                        f"📝 *回覆摘要*:\n```\n{summary}\n```"
+                    )
+                    reply_markup = InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton(
+                                f"🔄 切換回 {bg_agent_name}",
+                                callback_data=f"sess:switch:{bg_sess_id}"
+                            )
+                        ]
+                    ])
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(
+                            bot_app.bot.send_message(
+                                chat_id=target_chat_id,
+                                text=alert_text,
+                                reply_markup=reply_markup,
+                                parse_mode="Markdown",
+                            )
+                        )
+                    except Exception as e:
+                        logger.warning(f"Could not send bg completion notification: {e}")
+
+                return _on_bg_done
+
+            prev_session.set_background_completion_callback(
+                _make_bg_done_cb(prev_session.session_id, prev_session.agent_name, query.message.chat_id)
+            )
+
         # Switch active session pointer
         session_manager.set_active_session(user_id, session_id)
 
         # Stop existing streamer
         if user_id in active_streamers:
             active_streamers[user_id].stop()
+            del active_streamers[user_id]
 
         # Send last 100 lines log and switch confirmation
         logs = session.get_last_n_lines(n=100)

@@ -1,8 +1,11 @@
 import asyncio
 import json
 import logging
+import time
+from typing import Optional
 
 logger = logging.getLogger(__name__)
+
 
 
 class ACPClient:
@@ -96,6 +99,14 @@ class ACPClient:
                     logger.debug(f"Non-JSON output from ACP process: {line_str}")
             except asyncio.CancelledError:
                 break
+            except (ValueError, asyncio.LimitOverrunError) as e:
+                logger.warning(f"ACP stdio line exceeded buffer limit: {e}. Skipping chunk...")
+                try:
+                    # Attempt to read remaining chunk up to newline
+                    await self.process.stdout.readuntil(b"\n")
+                except Exception:
+                    pass
+                continue
             except Exception as e:
                 logger.error(f"Error in ACP read loop: {e}")
                 break
@@ -130,11 +141,17 @@ class ACPClient:
         # Case 3: Permission Request from Agent (tool execution approval)
         elif method in ("agent/request_permission", "permission/request", "request_approval"):
             req_id = data.get("id")
+            tool_name = params.get("name") or params.get("title") or "unknown"
+            logger.info(
+                f"ACP permission_request received: req_id={req_id} tool='{tool_name}' "
+                f"— waiting for user approval"
+            )
             for perm_listener in self._permission_listeners:
                 try:
                     perm_listener(req_id, params)
                 except Exception as e:
                     logger.error(f"Error in ACP permission listener: {e}")
+
 
     async def call_method(self, method: str, params: dict, timeout: float = 30.0) -> dict:
         """Call a JSON-RPC method on the ACP server and return result."""
@@ -157,7 +174,20 @@ class ACPClient:
         self.process.stdin.write(msg_bytes)
         await self.process.stdin.drain()
 
-        return await asyncio.wait_for(fut, timeout=timeout)
+        _t0 = time.monotonic()
+        try:
+            result = await asyncio.wait_for(fut, timeout=timeout)
+            elapsed = time.monotonic() - _t0
+            logger.debug(f"ACP call '{method}' (req_id={req_id}) completed in {elapsed:.3f}s")
+            return result
+        except asyncio.TimeoutError:
+            elapsed = time.monotonic() - _t0
+            logger.error(
+                f"ACP call '{method}' (req_id={req_id}) TIMED OUT after {elapsed:.3f}s "
+                f"(timeout={timeout}s)"
+            )
+            raise
+
 
     async def send_notification(self, method: str, params: dict):
         """Send a JSON-RPC notification (no response expected)."""

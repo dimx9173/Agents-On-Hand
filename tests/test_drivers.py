@@ -50,5 +50,63 @@ class TestDrivers(unittest.TestCase):
         asyncio.run(run_test())
 
 
+class TestPiRPCDriverProtocol(unittest.TestCase):
+    """Protocol-level tests for PiRPCDriver._handle_json_msg against real pi RPC events."""
+
+    def _make_driver(self):
+        events = []
+        driver = PiRPCDriver("pi", Path.cwd())
+        driver.register_listener(events.append)
+        return driver, events
+
+    def test_agent_end_does_not_exit_session(self):
+        """agent_end is a per-turn signal; the process stays alive for the next prompt."""
+        driver, events = self._make_driver()
+        driver.is_running = True
+        driver._handle_json_msg({"type": "agent_end", "messages": [], "willRetry": False})
+        driver._handle_json_msg({"type": "agent_settled"})
+        self.assertTrue(driver.is_running)
+        self.assertFalse(any(e.event_type == DriverEvent.EXIT for e in events))
+
+    def test_setstatus_is_not_a_tool_request(self):
+        """setStatus is a fire-and-forget UI update, not an approval dialog."""
+        driver, events = self._make_driver()
+        driver._handle_json_msg({
+            "type": "extension_ui_request",
+            "id": "some-uuid",
+            "method": "setStatus",
+            "statusText": "🔌 MCP: 3 servers enabled",
+        })
+        self.assertFalse(any(e.event_type == DriverEvent.TOOL_REQUEST for e in events))
+
+    def test_interactive_ui_request_becomes_tool_request(self):
+        """Interactive methods (confirm/select/input/editor) still raise approvals."""
+        driver, events = self._make_driver()
+        driver._handle_json_msg({
+            "type": "extension_ui_request",
+            "id": "req-1",
+            "method": "confirm",
+            "statusText": "Allow bash execution?",
+        })
+        reqs = [e for e in events if e.event_type == DriverEvent.TOOL_REQUEST]
+        self.assertEqual(len(reqs), 1)
+        self.assertEqual(reqs[0].request_id, "req-1")
+        self.assertEqual(reqs[0].tool_name, "confirm")
+
+    def test_text_and_thinking_deltas_emitted(self):
+        driver, events = self._make_driver()
+        driver._handle_json_msg({
+            "type": "message_update",
+            "assistantMessageEvent": {"type": "text_delta", "delta": "Hello"},
+        })
+        driver._handle_json_msg({
+            "type": "message_update",
+            "assistantMessageEvent": {"type": "thinking_delta", "delta": "hmm"},
+        })
+        types = [e.event_type for e in events]
+        self.assertIn(DriverEvent.TEXT_DELTA, types)
+        self.assertIn(DriverEvent.THOUGHT_DELTA, types)
+
+
 if __name__ == "__main__":
     unittest.main()

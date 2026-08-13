@@ -121,6 +121,16 @@ class ACPDriver(BaseDriver):
         if self.client:
             await self.client.respond_to_permission(request_id, approved)
 
+    def register_permission_listener(self, callback):
+        """Register a listener for permission_request events (tool approvals)."""
+        if self.client:
+            self.client.register_permission_listener(callback)
+
+    def unregister_permission_listener(self, callback):
+        """Unregister a previously registered permission listener."""
+        if self.client and callback in self.client._permission_listeners:
+            self.client._permission_listeners.remove(callback)
+
     def stop(self):
         """Stop the ACP client."""
         self.is_running = False

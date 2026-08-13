@@ -11,6 +11,7 @@ from typing import Dict, Optional, Callable, List, Any
 
 from .config import SESSION_LOG_DIR, AVAILABLE_CLI_AGENTS
 from .ansi_cleaner import strip_ansi_codes
+from .logging_setup import SessionTraceLogger
 from .drivers import (
     BaseDriver,
     DriverEvent,
@@ -55,6 +56,21 @@ class AgentSession:
 
         # Buffer for recent live streaming
         self.recent_output: str = ""
+
+        # Structured per-session trace log
+        self.trace = SessionTraceLogger(session_id)
+        self.trace.event("SESSION_INIT", f"agent={agent_name} command={command} cwd={working_dir}")
+
+        # Timing helpers
+        self._response_start_time: Optional[float] = None
+        self._first_token_time: Optional[float] = None
+        self._response_chars: int = 0
+
+        # One-shot background completion callback.
+        # Set by bot when user switches away from this session while it is still
+        # processing.  Fired once on the next EXIT event so the bot can send a
+        # "background response complete" notification.
+        self._bg_completion_callback: Optional[Callable[["AgentSession"], None]] = None
 
     @property
     def is_acp(self) -> bool:
@@ -115,26 +131,62 @@ class AgentSession:
         return False
 
     def _on_driver_event(self, event: DriverEvent):
-        """Handle events from driver and append to log file."""
+        """Handle events from driver, append to log file, and write trace entries."""
         if event.event_type == DriverEvent.TEXT_DELTA and event.content:
+            # Track first-token timing
+            if self._first_token_time is None and self._response_start_time is not None:
+                self._first_token_time = time.monotonic()
+                ttft = self._first_token_time - self._response_start_time
+                self.trace.agent_first_token(self.agent_name, ttft)
+
+            self._response_chars += len(event.content)
             self.recent_output += event.content
             if len(self.recent_output) > 10000:
                 self.recent_output = self.recent_output[-8000:]
             with open(self.log_file_path, "a", encoding="utf-8") as f:
                 f.write(event.content)
 
+        elif event.event_type == DriverEvent.THOUGHT_DELTA and event.content:
+            self.trace.event("THOUGHT_DELTA", f"{len(event.content)} chars")
+
+        elif event.event_type == DriverEvent.TOOL_REQUEST:
+            self.trace.tool_request(event.request_id, getattr(event, "tool_name", "unknown"))
+
         elif event.event_type == DriverEvent.EXIT:
+            # Record response completion timing before marking exit
+            if self._response_start_time is not None:
+                elapsed = time.monotonic() - self._response_start_time
+                self.trace.agent_response_done(self.agent_name, self._response_chars, elapsed)
+            self.trace.event("DRIVER_EXIT", f"driver={self.active_driver_name}")
             self.is_running = False
+
+            # Fire one-shot background completion callback (set when user switched away)
+            bg_cb = self._bg_completion_callback
+            self._bg_completion_callback = None
+            if bg_cb:
+                try:
+                    bg_cb(self)
+                except Exception as e:
+                    logger.error(f"Error in background completion callback: {e}")
+
             if self._on_exit_callback:
                 try:
                     self._on_exit_callback(self)
                 except Exception as e:
                     logger.error(f"Error in session exit callback: {e}")
 
+
+
     def send_input(self, text: str):
         """Send prompt to active driver."""
         if self.driver and self.is_running:
+            self.trace.user_input(text)
+            # Reset per-response timing counters
+            self._response_start_time = time.monotonic()
+            self._first_token_time = None
+            self._response_chars = 0
             self.driver.send_prompt(text)
+
 
     def send_control_char(self, char: str):
         """Send control character (ESC/Ctrl+C) to active driver."""
@@ -143,24 +195,70 @@ class AgentSession:
 
     async def respond_permission(self, request_id: Any, approved: bool):
         """Respond to permission request."""
+        self.trace.permission_response(request_id, approved)
         if self.driver:
             await self.driver.respond_permission(request_id, approved)
 
+    def set_background_completion_callback(
+        self, callback: Optional[Callable[["AgentSession"], None]]
+    ) -> None:
+        """Register a one-shot callback fired when this session completes in the background.
+
+        Called by the bot when the user switches to another session while this
+        session is still processing.  The callback is invoked exactly once on the
+        next DRIVER_EXIT event, then cleared automatically.
+        Pass None to cancel a previously registered callback.
+        """
+        self._bg_completion_callback = callback
+
+
     def register_listener(self, callback: Callable[[DriverEvent], None]):
-        """Register event listener to active driver."""
-        if self.driver:
-            self.driver.register_listener(callback)
+        """Register event listener to active driver.
+
+        Also bridges ACP permission_request events as TOOL_REQUEST DriverEvents
+        so that UnifiedStreamer can render the Telegram Inline Keyboard buttons.
+        """
+        if not self.driver:
+            return
+        self.driver.register_listener(callback)
+        # Bridge permission_request → TOOL_REQUEST so stream_handler receives it
+        if hasattr(self.driver, "register_permission_listener"):
+            def _perm_bridge(req_id: Any, params: dict):
+                callback(
+                    DriverEvent(
+                        DriverEvent.TOOL_REQUEST,
+                        request_id=req_id,
+                        tool_name=params.get("name") or params.get("title") or "Tool Execution",
+                        tool_args=params.get("args") or params.get("description") or {},
+                    )
+                )
+            # Store bridge so we can remove it during unregister
+            if not hasattr(self, "_perm_bridges"):
+                self._perm_bridges: Dict[Any, Any] = {}
+            self._perm_bridges[id(callback)] = _perm_bridge
+            self.driver.register_permission_listener(_perm_bridge)
 
     def unregister_listener(self, callback: Callable[[DriverEvent], None]):
         """Unregister event listener from active driver."""
-        if self.driver:
-            self.driver.unregister_listener(callback)
+        if not self.driver:
+            return
+        self.driver.unregister_listener(callback)
+        # Remove bridged permission listener if present
+        bridges = getattr(self, "_perm_bridges", {})
+        bridge = bridges.pop(id(callback), None)
+        if bridge and hasattr(self.driver, "unregister_permission_listener"):
+            self.driver.unregister_permission_listener(bridge)
 
     def stop(self):
         """Stop active session and driver."""
         self.is_running = False
         if self.driver:
             self.driver.stop()
+        # Flush and close structured trace log
+        try:
+            self.trace.close()
+        except Exception:
+            pass
 
     def get_last_n_lines(self, n: int = 100) -> str:
         """Read last N lines from log file."""

@@ -8,6 +8,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-08-21
+
+### Added
+- **Turn completion events (`TURN_END`)**: standardized turn completion across all drivers (`ACPDriver`, `ClaudeStreamDriver`, `PiRPCDriver`, `BaseDriver`).
+- **Background completion notifications on turn completion**: multi-agent background sessions notify users on turn end instead of waiting exclusively for process exit.
+- **Conversation logging**: user prompts are now appended (`👤 User: ...`) to session log files alongside agent output.
+- **Scoped ACP tool permission callbacks**: callback data format updated to `acp_perm:action:session_id:req_id` with backward-compatible fallback to ensure accurate session routing.
+
+### Fixed
+- **Safe background message handling**: added error handling and safety wrappers for background exit notifications and tool permission prompts to prevent task exceptions.
+- **Session background callback reset**: active session switching safely clears stale background completion callbacks.
+
+### Tests
+- Added unit tests for background turn completion callback triggering.
+
 ## [1.1.0] — 2026-08-13
 
 ### Added

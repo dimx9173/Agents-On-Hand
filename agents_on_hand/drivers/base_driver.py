@@ -17,6 +17,7 @@ class DriverEvent:
     THOUGHT_DELTA = "thought_delta"
     TOOL_REQUEST = "tool_request"
     TOOL_RESULT = "tool_result"
+    TURN_END = "turn_end"
     EXIT = "exit"
 
     def __init__(

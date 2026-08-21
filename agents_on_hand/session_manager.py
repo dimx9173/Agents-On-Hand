@@ -152,13 +152,15 @@ class AgentSession:
         elif event.event_type == DriverEvent.TOOL_REQUEST:
             self.trace.tool_request(event.request_id, getattr(event, "tool_name", "unknown"))
 
-        elif event.event_type == DriverEvent.EXIT:
-            # Record response completion timing before marking exit
+        elif event.event_type in (DriverEvent.TURN_END, DriverEvent.EXIT):
+            # Record response completion timing
             if self._response_start_time is not None:
                 elapsed = time.monotonic() - self._response_start_time
                 self.trace.agent_response_done(self.agent_name, self._response_chars, elapsed)
-            self.trace.event("DRIVER_EXIT", f"driver={self.active_driver_name}")
-            self.is_running = False
+            self.trace.event("TURN_END", f"driver={self.active_driver_name} type={event.event_type}")
+
+            if event.event_type == DriverEvent.EXIT:
+                self.is_running = False
 
             # Fire one-shot background completion callback (set when user switched away)
             bg_cb = self._bg_completion_callback
@@ -169,7 +171,7 @@ class AgentSession:
                 except Exception as e:
                     logger.error(f"Error in background completion callback: {e}")
 
-            if self._on_exit_callback:
+            if event.event_type == DriverEvent.EXIT and self._on_exit_callback:
                 try:
                     self._on_exit_callback(self)
                 except Exception as e:
@@ -181,6 +183,13 @@ class AgentSession:
         """Send prompt to active driver."""
         if self.driver and self.is_running:
             self.trace.user_input(text)
+            # Record user prompt in log file for complete conversation history
+            try:
+                with open(self.log_file_path, "a", encoding="utf-8") as f:
+                    f.write(f"\n👤 User: {text}\n\n")
+            except Exception as e:
+                logger.error(f"Error writing user prompt to log: {e}")
+
             # Reset per-response timing counters
             self._response_start_time = time.monotonic()
             self._first_token_time = None

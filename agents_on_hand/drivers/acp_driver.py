@@ -105,7 +105,15 @@ class ACPDriver(BaseDriver):
     def send_prompt(self, text: str):
         """Send prompt to ACP Agent."""
         if self.client and self.is_running:
-            asyncio.create_task(self.client.prompt(text))
+            async def _do_prompt():
+                try:
+                    await self.client.prompt(text)
+                except Exception as e:
+                    logger.error(f"Error in ACP prompt: {e}")
+                finally:
+                    self.emit_event(DriverEvent(DriverEvent.TURN_END))
+
+            asyncio.create_task(_do_prompt())
 
     def send_control_char(self, char: str):
         """Control chars are handled via prompt or SIGINT for ACP."""

@@ -425,6 +425,9 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
                 _make_bg_done_cb(prev_session.session_id, prev_session.agent_name, query.message.chat_id)
             )
 
+        # Clear any background completion callback on the target session
+        session.set_background_completion_callback(None)
+
         # Switch active session pointer
         session_manager.set_active_session(user_id, session_id)
 
@@ -498,12 +501,20 @@ async def acp_permission_callback_handler(update: Update, context: ContextTypes.
     if len(parts) < 3:
         return
 
-    action, req_id_str = parts[1], parts[2]
-    user_id = query.from_user.id
-    active_session = session_manager.get_active_session(user_id)
+    action = parts[1]
+    if len(parts) >= 4:
+        # Format: acp_perm:action:session_id:req_id
+        session_id = parts[2]
+        req_id_str = parts[3]
+        target_session = session_manager.get_session(session_id)
+    else:
+        # Fallback format: acp_perm:action:req_id
+        req_id_str = parts[2]
+        user_id = query.from_user.id
+        target_session = session_manager.get_active_session(user_id)
 
-    if not active_session or not hasattr(active_session, "respond_permission"):
-        await query.edit_message_text("⚠️ 找不到對應的 Active ACP Session。")
+    if not target_session or not hasattr(target_session, "respond_permission"):
+        await query.edit_message_text("⚠️ 找不到對應的 ACP Session。")
         return
 
     try:
@@ -512,10 +523,10 @@ async def acp_permission_callback_handler(update: Update, context: ContextTypes.
         req_id = req_id_str
 
     if action == "approve":
-        await active_session.respond_permission(req_id, approved=True)
+        await target_session.respond_permission(req_id, approved=True)
         await query.edit_message_text("✅ *已授權 Agent 執行此 Tool*", parse_mode="Markdown")
     else:
-        await active_session.respond_permission(req_id, approved=False)
+        await target_session.respond_permission(req_id, approved=False)
         await query.edit_message_text("❌ *已拒絕 Agent 執行此 Tool*", parse_mode="Markdown")
 
 
@@ -680,18 +691,22 @@ def on_background_session_finished(session: Any):
         f"如需繼續使用，請點擊下方按鈕重新啟動。"
     )
 
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(
-            bot_app.bot.send_message(
+    async def _safe_send_exit_alert():
+        try:
+            await bot_app.bot.send_message(
                 chat_id=user_id,
                 text=alert_text,
                 reply_markup=reply_markup,
                 parse_mode="Markdown",
             )
-        )
+        except Exception as err:
+            logger.warning(f"Could not send exit notification: {err}")
+
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_safe_send_exit_alert())
     except Exception as e:
-        logger.warning(f"Could not send exit notification: {e}")
+        logger.warning(f"Could not schedule exit notification: {e}")
 
 
 async def session_restart_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

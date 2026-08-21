@@ -91,6 +91,7 @@ class ClaudeStreamDriver(BaseDriver):
             res_text = data.get("result")
             if res_text and isinstance(res_text, str):
                 self.emit_event(DriverEvent(DriverEvent.TEXT_DELTA, content=res_text))
+            self.emit_event(DriverEvent(DriverEvent.TURN_END))
 
         elif msg_type in ("text", "content_block_delta"):
             delta = data.get("delta", {})

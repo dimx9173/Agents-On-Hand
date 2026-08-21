@@ -127,15 +127,8 @@ class PiRPCDriver(BaseDriver):
                 )
             )
 
-        elif msg_type == "turn_end":
-            # Turn is complete, no action needed — text was already emitted via text_delta events
-            pass
-
-        elif msg_type == "agent_end":
-            # Per-turn completion signal in pi RPC. The process stays alive and keeps
-            # accepting prompts (an "agent_settled" event follows). Do NOT emit EXIT here;
-            # EXIT is only emitted by _read_loop on real stdout EOF / process death.
-            pass
+        elif msg_type in ("turn_end", "agent_end", "agent_settled"):
+            self.emit_event(DriverEvent(DriverEvent.TURN_END))
 
 
 

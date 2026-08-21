@@ -168,19 +168,23 @@ class UnifiedStreamer:
 
         reply_markup = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("✅ 同意執行", callback_data=f"acp_perm:approve:{req_id}"),
-                InlineKeyboardButton("❌ 拒絕執行", callback_data=f"acp_perm:reject:{req_id}"),
+                InlineKeyboardButton("✅ 同意執行", callback_data=f"acp_perm:approve:{self.session.session_id}:{req_id}"),
+                InlineKeyboardButton("❌ 拒絕執行", callback_data=f"acp_perm:reject:{self.session.session_id}:{req_id}"),
             ]
         ])
 
-        asyncio.create_task(
-            self.bot.send_message(
-                chat_id=self.chat_id,
-                text=text,
-                reply_markup=reply_markup,
-                parse_mode="Markdown",
-            )
-        )
+        async def _safe_send_tool_req():
+            try:
+                await self.bot.send_message(
+                    chat_id=self.chat_id,
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                logger.warning(f"Error sending tool request message: {e}")
+
+        asyncio.create_task(_safe_send_tool_req())
 
     def _cancel_trailing_flush(self):
         """Cancel any pending trailing flush task."""

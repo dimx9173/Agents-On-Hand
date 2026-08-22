@@ -11,7 +11,7 @@ def strip_ansi_codes(text: str) -> str:
     if not text:
         return ""
     clean_text = ANSI_ESCAPE_PATTERN.sub('', text)
-    
+
     raw_lines = clean_text.split('\n')
     processed_lines = []
     for line in raw_lines:
@@ -20,7 +20,7 @@ def strip_ansi_codes(text: str) -> str:
             non_empty_parts = [p for p in parts if p]
             line = non_empty_parts[-1] if non_empty_parts else ""
         processed_lines.append(line)
-    
+
     return "\n".join(processed_lines)
 
 
@@ -51,16 +51,20 @@ def clean_cli_output(raw_text: str) -> str:
         line_str = line.strip()
         if not line_str:
             continue
-            
+
         # Skip pure TUI box drawing lines
         stripped_box = box_char_pattern.sub('', line_str)
         if not stripped_box:
             continue
-            
+
         # Skip static TUI header/banner lines
         if any(kw.lower() in line_str.lower() for kw in tui_banner_keywords):
             continue
-            
+
+        # Skip raw internal JSON hook dumps or transcript diagnostics
+        if (line_str.startswith('{"session_id":') and ("hook_event_name" in line_str or "transcript_path" in line_str)) or line_str.startswith("[{'type': 'content'"):
+            continue
+
         # Strip TUI side borders from active lines (e.g. │  hello  │ -> hello)
         cleaned_line = re.sub(r'^[\u2500-\u257F\u2580-\u259F╭╰│─┌┐└┘├┤┼╯┬┴╘╒╓╫╪█▀▄▌▐╟╢┼\s]+|[\u2500-\u257F\u2580-\u259F╭╰│─┌┐└┘├┤┼╯┬┴╘╒╓╫╪█▀▄▌▐╟╢┼\s]+$', '', line_str).strip()
         if cleaned_line:
@@ -89,7 +93,7 @@ def format_hermes_style(text: str) -> str:
 
     for line in lines:
         line_str = line.strip()
-        
+
         if line_str.startswith("```"):
             in_code_block = not in_code_block
             formatted_lines.append(line)
@@ -121,12 +125,12 @@ def format_hermes_style(text: str) -> str:
 def format_telegram_code_block(text: str, max_chars: int = 3800, lang: str = "") -> str:
     """Strip ANSI codes, clean text, and format inside a safe Markdown code block."""
     clean = clean_cli_output(text)
-    
+
     if len(clean) > max_chars:
         trimmed_notice = "... [Log truncated - Showing last output] ...\n"
         clean = trimmed_notice + clean[-(max_chars - len(trimmed_notice)):]
-    
+
     if not clean.strip():
         clean = "(No output yet...)"
-        
+
     return f"```{lang}\n{clean}\n```"

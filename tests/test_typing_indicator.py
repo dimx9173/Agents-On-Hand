@@ -1,8 +1,9 @@
-import unittest
 import asyncio
+import unittest
 from unittest.mock import AsyncMock, MagicMock
-from agents_on_hand.stream_handler import DirectChatStreamer
+
 from agents_on_hand.acp_streamer import ACPStreamer
+from agents_on_hand.stream_handler import DirectChatStreamer
 
 
 class TestTypingIndicator(unittest.TestCase):

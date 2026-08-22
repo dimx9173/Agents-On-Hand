@@ -15,7 +15,6 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Optional
 
 # ─────────────────────────────────────────────
 # Log directories
@@ -103,17 +102,33 @@ LOG_FORMAT = "%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s — %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
-def setup_logging(level: int = logging.INFO) -> None:
+def setup_logging(level: int | None = None) -> None:
     """
     Configure root logger once with:
     - RotatingFileHandler → ~/.agents-on-hand/aoh.log
     - StreamHandler (console, coloured)
     Both filtered through _SanitizingFilter.
+
+    Level resolution (priority):
+    1. Explicit `level` argument
+    2. Env `AOH_DEBUG=1` / `LOG_LEVEL=DEBUG` → DEBUG
+    3. Default INFO
     """
     global _SETUP_DONE
     if _SETUP_DONE:
         return
     _SETUP_DONE = True
+
+    # Resolve level from env if not explicitly passed
+    if level is None:
+        _env_debug = os.getenv("AOH_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
+        _env_level = os.getenv("LOG_LEVEL", "").strip().upper()
+        if _env_debug or _env_level == "DEBUG":
+            level = logging.DEBUG
+        elif _env_level == "INFO":
+            level = logging.INFO
+        else:
+            level = logging.INFO
 
     sanitizer = _SanitizingFilter()
 
@@ -128,9 +143,8 @@ def setup_logging(level: int = logging.INFO) -> None:
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
     file_handler.addFilter(sanitizer)
 
-    # ── Console handler (INFO+, coloured) ───────────────────────────────────
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(level)
     use_colour = os.isatty(1)  # only colour when stdout is a terminal
     if use_colour:
         console_handler.setFormatter(
@@ -148,9 +162,9 @@ def setup_logging(level: int = logging.INFO) -> None:
     root.addHandler(file_handler)
     root.addHandler(console_handler)
 
-    # Silence excessively noisy third-party loggers
+    noisy_level = logging.DEBUG if level == logging.DEBUG else logging.WARNING
     for noisy in ("httpx", "httpcore", "telegram", "apscheduler"):
-        logging.getLogger(noisy).setLevel(logging.WARNING)
+        logging.getLogger(noisy).setLevel(noisy_level)
 
     logging.getLogger("AgentsOnHand").info(
         f"Logging initialised — app log: {APP_LOG_FILE}"
@@ -201,7 +215,7 @@ class SessionTraceLogger:
         """Record completion of an agent response."""
         self._write("AGENT_DONE", f"agent={agent} chars={chars} elapsed={elapsed_s:.3f}s")
 
-    def tool_request(self, req_id, tool_name: str, approved: Optional[bool] = None) -> None:
+    def tool_request(self, req_id, tool_name: str, approved: bool | None = None) -> None:
         """Record a tool permission request and its resolution."""
         status = "" if approved is None else f" approved={approved}"
         self._write("TOOL_REQUEST", f"req_id={req_id} tool={tool_name}{status}")

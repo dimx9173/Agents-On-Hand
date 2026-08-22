@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock
-from agents_on_hand.session_manager import SessionManager, CLISession
-from agents_on_hand.acp_session import ACPSession
+
+from agents_on_hand.session_manager import SessionManager
 
 
 class TestSessionExitNotification(unittest.TestCase):
@@ -20,9 +20,10 @@ class TestSessionExitNotification(unittest.TestCase):
         self.assertEqual(exited_sessions[0].session_id, "sess_test_123")
 
     def test_background_turn_completion_callback_trigger(self):
+        from pathlib import Path
+
         from agents_on_hand.drivers.base_driver import DriverEvent
         from agents_on_hand.session_manager import AgentSession
-        from pathlib import Path
 
         session = AgentSession(
             session_id="sess_bg_test",

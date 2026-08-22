@@ -1,5 +1,6 @@
 import unittest
-from agents_on_hand.config import get_installed_cli_agents, AVAILABLE_CLI_AGENTS
+
+from agents_on_hand.config import get_installed_cli_agents
 
 
 class TestAgentVerification(unittest.TestCase):

@@ -1,6 +1,10 @@
 import unittest
 from pathlib import Path
-from agents_on_hand.ansi_cleaner import strip_ansi_codes, clean_cli_output, format_telegram_code_block
+
+from agents_on_hand.ansi_cleaner import (
+    clean_cli_output,
+    strip_ansi_codes,
+)
 from agents_on_hand.config import is_path_allowed
 
 

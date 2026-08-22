@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import time
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,12 +15,12 @@ class ACPClient:
     def __init__(self, command: str, working_dir: str):
         self.command = command
         self.working_dir = working_dir
-        self.process: Optional[asyncio.subprocess.Process] = None
+        self.process: asyncio.subprocess.Process | None = None
         self._request_id = 0
         self._pending_requests: dict = {}
         self._listeners = []
         self._permission_listeners = []
-        self._read_task: Optional[asyncio.Task] = None
+        self._read_task: asyncio.Task | None = None
         self.is_running = False
 
     def register_listener(self, callback):
@@ -228,7 +227,7 @@ class ACPClient:
         return await self.call_method(
             "session/prompt",
             params,
-            timeout=120.0,
+            timeout=600.0,  # agentic turns spawn subagents and can take minutes; 120s killed a legit 140s run
         )
 
 

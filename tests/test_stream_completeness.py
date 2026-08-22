@@ -13,8 +13,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 from telegram.error import BadRequest
 
-from agents_on_hand.stream_handler import UnifiedStreamer
 from agents_on_hand.drivers.base_driver import DriverEvent
+from agents_on_hand.stream_handler import UnifiedStreamer
 
 
 def _make_bot():
@@ -191,6 +191,50 @@ class TestStreamCompleteness(unittest.TestCase):
             second_text = bot.send_message.call_args_list[1].kwargs.get("text", "")
             self.assertIn("answer two", second_text)
             self.assertNotIn("answer one", second_text)
+
+    def test_long_message_automatically_chunks_across_multiple_messages(self):
+        """When text delta exceeds Telegram safe limit (3800 chars), it must automatically
+        finalize the first message and create subsequent messages without dropping tokens."""
+
+        async def run_test():
+            bot = _make_bot()
+            msg1 = MagicMock(message_id=101)
+            msg2 = MagicMock(message_id=102)
+            msg3 = MagicMock(message_id=103)
+            bot.send_message = AsyncMock(side_effect=[msg1, msg2, msg3])
+
+            session = MagicMock()
+            streamer = UnifiedStreamer(
+                bot=bot, chat_id=12345, session=session, edit_interval=0.1
+            )
+            streamer.start()
+
+            # Emit ~8000 characters with newlines
+            chunk_a = "Line A " * 400 + "\n"  # ~2800 chars
+            chunk_b = "Line B " * 400 + "\n"  # ~2800 chars
+            chunk_c = "Line C " * 400 + "\n"  # ~2800 chars
+
+            streamer._on_driver_event(DriverEvent(DriverEvent.TEXT_DELTA, content=chunk_a))
+            await asyncio.sleep(0.2)
+            streamer._on_driver_event(DriverEvent(DriverEvent.TEXT_DELTA, content=chunk_b))
+            await asyncio.sleep(0.2)
+            streamer._on_driver_event(DriverEvent(DriverEvent.TEXT_DELTA, content=chunk_c))
+            await asyncio.sleep(0.5)
+
+            streamer.stop()
+            await asyncio.sleep(0)
+
+            # Check that multiple messages were created (bot.send_message called at least 2-3 times)
+            self.assertGreaterEqual(
+                bot.send_message.call_count,
+                2,
+                "Long streaming text should roll over into multiple Telegram messages",
+            )
+            rendered = _rendered_texts(bot)
+            combined_rendered = "".join(rendered)
+            self.assertIn("Line A", combined_rendered)
+            self.assertIn("Line B", combined_rendered)
+            self.assertIn("Line C", combined_rendered)
 
         asyncio.run(run_test())
 

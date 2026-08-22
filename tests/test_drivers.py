@@ -2,17 +2,15 @@
 Unit tests for Multi-Protocol Driver Architecture and Probing Chain.
 """
 
-import unittest
 import asyncio
+import unittest
 from pathlib import Path
+
 from agents_on_hand.drivers import (
     DriverEvent,
-    ACPDriver,
     PiRPCDriver,
-    ClaudeStreamDriver,
-    PTYDriver,
 )
-from agents_on_hand.session_manager import AgentSession, session_manager
+from agents_on_hand.session_manager import AgentSession
 
 
 class TestDrivers(unittest.TestCase):

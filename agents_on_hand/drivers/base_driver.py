@@ -2,10 +2,11 @@
 Base Driver Interface for Agents-On-Hand Protocol Drivers.
 """
 
-from abc import ABC, abstractmethod
-from pathlib import Path
-from typing import Callable, Optional, Dict, Any, List
 import logging
+from abc import ABC, abstractmethod
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +25,9 @@ class DriverEvent:
         self,
         event_type: str,
         content: str = "",
-        request_id: Optional[Any] = None,
+        request_id: Any | None = None,
         tool_name: str = "",
-        tool_args: Optional[Dict[str, Any]] = None,
+        tool_args: dict[str, Any] | None = None,
         exit_code: int = 0,
     ):
         self.event_type = event_type
@@ -36,7 +37,7 @@ class DriverEvent:
         self.tool_args = tool_args or {}
         self.exit_code = exit_code
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.event_type,
             "content": self.content,
@@ -57,7 +58,7 @@ class BaseDriver(ABC):
         self.command: str = command
         self.working_dir: Path = working_dir
         self.is_running: bool = False
-        self._listeners: List[Callable[[DriverEvent], None]] = []
+        self._listeners: list[Callable[[DriverEvent], None]] = []
 
     def register_listener(self, callback: Callable[[DriverEvent], None]):
         """Register listener for standardized DriverEvents."""

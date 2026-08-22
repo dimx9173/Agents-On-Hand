@@ -6,7 +6,8 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
+
 from .base_driver import BaseDriver, DriverEvent
 
 logger = logging.getLogger(__name__)
@@ -23,9 +24,9 @@ class PiRPCDriver(BaseDriver):
         # Ensure command includes --mode rpc
         cmd = command if "--mode" in command else f"{command} --mode rpc"
         super().__init__(cmd, working_dir)
-        self.process: Optional[asyncio.subprocess.Process] = None
-        self._read_task: Optional[asyncio.Task] = None
-        self._stderr_task: Optional[asyncio.Task] = None
+        self.process: asyncio.subprocess.Process | None = None
+        self._read_task: asyncio.Task | None = None
+        self._stderr_task: asyncio.Task | None = None
 
     async def start(self) -> bool:
         """Start the pi --mode rpc process and monitor stdout JSON events."""

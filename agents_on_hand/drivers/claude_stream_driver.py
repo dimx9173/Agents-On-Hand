@@ -6,7 +6,8 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
+
 from .base_driver import BaseDriver, DriverEvent
 
 logger = logging.getLogger(__name__)
@@ -23,8 +24,8 @@ class ClaudeStreamDriver(BaseDriver):
         else:
             cmd = command
         super().__init__(cmd, working_dir)
-        self.process: Optional[asyncio.subprocess.Process] = None
-        self._read_task: Optional[asyncio.Task] = None
+        self.process: asyncio.subprocess.Process | None = None
+        self._read_task: asyncio.Task | None = None
 
     async def start(self) -> bool:
         """Start the claude process with stream-json format."""

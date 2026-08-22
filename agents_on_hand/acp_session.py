@@ -1,10 +1,11 @@
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Optional, Callable, List, Dict
-from .config import SESSION_LOG_DIR
+
 from .acp_client import ACPClient
+from .config import SESSION_LOG_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class ACPSession:
         agent_name: str,
         command: str,
         working_dir: Path,
-        on_exit_callback: Optional[Callable[["ACPSession"], None]] = None,
+        on_exit_callback: Callable[["ACPSession"], None] | None = None,
     ):
         self.session_id: str = session_id
         self.user_id: int = user_id
@@ -62,9 +63,9 @@ class ACPSession:
         self.is_running: bool = False
         self.is_acp: bool = True
 
-        self.client: Optional[ACPClient] = None
-        self._listeners: List[Callable[[dict], None]] = []
-        self._permission_listeners: List[Callable[[int, dict], None]] = []
+        self.client: ACPClient | None = None
+        self._listeners: list[Callable[[dict], None]] = []
+        self._permission_listeners: list[Callable[[int, dict], None]] = []
         self._on_exit_callback = on_exit_callback
         self.recent_output: str = ""
 
@@ -166,7 +167,7 @@ class ACPSession:
         if not self.log_file_path.exists():
             return "(No log content yet)"
         try:
-            with open(self.log_file_path, "r", encoding="utf-8", errors="replace") as f:
+            with open(self.log_file_path, encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
                 return "".join(lines[-n:])
         except Exception as e:
@@ -176,7 +177,7 @@ class ACPSession:
         """Terminate the ACP session."""
         self.is_running = False
         if self.client:
-            asyncio.create_task(self.client.kill())
+            self.client.stop()
         if self._on_exit_callback:
             try:
                 self._on_exit_callback(self)

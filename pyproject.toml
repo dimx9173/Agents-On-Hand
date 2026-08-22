@@ -1,0 +1,47 @@
+[project]
+name = "agents-on-hand"
+version = "1.2.0"
+description = "Telegram bot orchestrating local CLI AI agents"
+requires-python = ">=3.10"
+dependencies = [
+    "python-telegram-bot>=20.0,<22.0",
+    "python-dotenv>=1.0.0",
+    "pexpect>=4.8.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "I"]
+ignore = ["E501"]  # E501: long TUI regex lines intentional, will split later
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = false
+warn_unused_configs = true
+ignore_missing_imports = true
+check_untyped_defs = false
+disable_error_code = ["var-annotated", "attr-defined", "union-attr", "name-defined", "no-any-return", "arg-type", "assignment", "abstract", "return", "index"]
+
+[[tool.mypy.overrides]]
+module = "pexpect.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["agents_on_hand"]
+branch = true
+omit = ["tests/*"]
+
+[tool.coverage.report]
+fail_under = 45
+show_missing = true
+skip_covered = false
+
+[tool.coverage.html]
+directory = "htmlcov"

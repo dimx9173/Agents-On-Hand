@@ -4,11 +4,13 @@ PTY Fallback Driver for Agents-On-Hand (Unix Pseudo-Terminal via pexpect).
 
 import asyncio
 import logging
-import pexpect
 from pathlib import Path
-from typing import Any, Optional
-from .base_driver import BaseDriver, DriverEvent
+from typing import Any
+
+import pexpect
+
 from ..ansi_cleaner import clean_cli_output
+from .base_driver import BaseDriver, DriverEvent
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +20,8 @@ class PTYDriver(BaseDriver):
 
     def __init__(self, command: str, working_dir: Path):
         super().__init__(command, working_dir)
-        self.process: Optional[pexpect.spawn] = None
-        self._read_task: Optional[asyncio.Task] = None
+        self.process: pexpect.spawn | None = None
+        self._read_task: asyncio.Task | None = None
 
     async def start(self) -> bool:
         """Spawn the process in a pseudo-terminal."""

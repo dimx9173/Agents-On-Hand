@@ -9,17 +9,17 @@ Includes full end-to-end payload verification right before sending to Telegram (
 """
 
 import asyncio
-import sys
 import os
+import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents_on_hand.drivers import (
-    DriverEvent,
-    PiRPCDriver,
     ACPDriver,
     ClaudeStreamDriver,
+    DriverEvent,
+    PiRPCDriver,
 )
 from agents_on_hand.stream_handler import UnifiedStreamer
 
@@ -101,7 +101,7 @@ async def test_agent(name: str, driver):
             asyncio.create_task(driver.respond_permission(event.request_id, approved=True))
 
         elif event.event_type == DriverEvent.EXIT:
-            print(f"\n  🔴 EXIT event received")
+            print("\n  🔴 EXIT event received")
             exit_received.set()
 
     # Setup Mock Telegram Bot and UnifiedStreamer
@@ -110,13 +110,13 @@ async def test_agent(name: str, driver):
     streamer = UnifiedStreamer(bot=mock_bot, chat_id=99999, session=mock_session, edit_interval=0.1)
 
     # Start driver
-    print(f"  → Starting driver...")
+    print("  → Starting driver...")
     success = await driver.start()
     if not success:
-        print(f"  ❌ Driver failed to start!")
+        print("  ❌ Driver failed to start!")
         return False
 
-    print(f"  ✅ Driver started successfully")
+    print("  ✅ Driver started successfully")
     driver.register_listener(on_event)
     streamer.start()
 
@@ -166,13 +166,13 @@ async def test_agent(name: str, driver):
     print(f"  📱 TG Pre-Send Payload (Turn 1):\n    >>> {tg_payload1.strip()[:120]}...")
 
     if not turn1_text.strip() or not tg_payload1.strip():
-        print(f"  ❌ FAIL — Turn 1 received no text response or TG payload was empty!")
+        print("  ❌ FAIL — Turn 1 received no text response or TG payload was empty!")
         streamer.stop()
         driver.stop()
         return False
 
     if exit_received.is_set():
-        print(f"  ❌ FAIL — EXIT received after Turn 1; session died prematurely!")
+        print("  ❌ FAIL — EXIT received after Turn 1; session died prematurely!")
         streamer.stop()
         driver.stop()
         return False
@@ -223,7 +223,7 @@ async def test_agent(name: str, driver):
     print(f"  📱 TG Pre-Send Payload (Turn 2):\n    >>> {tg_payload2.strip()[:150]}...")
 
     if not turn2_text.strip() or not tg_payload2.strip():
-        print(f"  ❌ FAIL — Turn 2 received no response or TG payload was empty!")
+        print("  ❌ FAIL — Turn 2 received no response or TG payload was empty!")
         streamer.stop()
         driver.stop()
         return False

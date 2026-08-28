@@ -146,15 +146,15 @@ All protocol drivers emit a normalized `DriverEvent` stream that `UnifiedStreame
 
 ```mermaid
 flowchart LR
-    U[🧑 Telegram User] -->|messages / buttons| B[bot.py / app.py]
-    B -->|@restricted whitelist| S[session_manager<br/>Probing Chain + lifecycle]
-    S -->|spawn highest-fidelity| D{Driver}
-    D -->|ACP| A[ACPDriver]
-    D -->|RPC| P[PiRPCDriver]
-    D -->|Stream-JSON| C[ClaudeStreamDriver]
-    D -->|PTY| Y[PTYDriver]
-    A & P & C & Y -->|DriverEvent stream| R[UnifiedStreamer]
-    R -->|HTML / inline keyboards| U
+    U["🧑 Telegram User"] -->|"messages / buttons"| B["bot.py / app.py"]
+    B -->|"@restricted whitelist"| S["session_manager<br/>Probing Chain + lifecycle"]
+    S -->|"spawn highest-fidelity"| D{"Driver"}
+    D -->|"ACP"| A["ACPDriver"]
+    D -->|"RPC"| P["PiRPCDriver"]
+    D -->|"Stream-JSON"| C["ClaudeStreamDriver"]
+    D -->|"PTY"| Y["PTYDriver"]
+    A & P & C & Y -->|"DriverEvent stream"| R["UnifiedStreamer"]
+    R -->|"HTML / inline keyboards"| U
 ```
 
 **Unified event types:** `TEXT_DELTA` · `THOUGHT_DELTA` (rendered as expandable 💭 thinking) · `TOOL_REQUEST` (approval keyboard) · `TOOL_RESULT` (expandable 🛠️ block) · `TURN_END` (stats footer + quick actions) · `EXIT`.

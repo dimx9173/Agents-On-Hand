@@ -14,6 +14,19 @@ def test_callback_registry_eviction():
     # ensure eviction happened: first token should be gone or registry bounded
     assert len(path_registry) == _MAX_PATH_TOKENS or len(path_registry) <= _MAX_PATH_TOKENS + 1
 
+def test_resolve_path_token_fail_closed():
+    """Unknown/expired tokens resolve to None (fail closed), never to a raw path."""
+    from agents_on_hand.callback_registry import path_registry, path_to_token, get_path_token, resolve_path_token
+    path_registry.clear()
+    path_to_token.clear()
+    # unknown token -> None
+    assert resolve_path_token("p_999_deadbeef") is None
+    # raw path string is no longer accepted as a fallback
+    assert resolve_path_token("/etc/passwd") is None
+    # valid round-trip still works
+    tok = get_path_token(Path("/tmp/roundtrip_dir"))
+    assert resolve_path_token(tok) == Path("/tmp/roundtrip_dir").resolve()
+
 def test_config_parse_edge():
     from agents_on_hand.config import _parse_user_ids
     assert _parse_user_ids("") == set()

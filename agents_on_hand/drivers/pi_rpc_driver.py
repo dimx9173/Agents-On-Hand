@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from ..process_utils import kill_process_tree, set_pdeathsig_and_pgrp
 from .base_driver import BaseDriver, DriverEvent
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ class PiRPCDriver(BaseDriver):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.working_dir),
+                preexec_fn=set_pdeathsig_and_pgrp,
             )
             self.is_running = True
             self._read_task = asyncio.create_task(self._read_loop())
@@ -142,7 +144,11 @@ class PiRPCDriver(BaseDriver):
             asyncio.create_task(self.process.stdin.drain())
 
     def send_control_char(self, char: str):
-        """Send SIGINT to process for Ctrl+C or ESC."""
+        """Send SIGINT/terminate to process for ESC or Ctrl+C.
+
+        Note: pi --mode rpc has no interactive ^C handler, so ESC and Ctrl+C
+        both terminate the process (the user can restart the session after).
+        """
         if self.process:
             try:
                 self.process.terminate()
@@ -164,8 +170,9 @@ class PiRPCDriver(BaseDriver):
     def stop(self):
         """Stop the Pi RPC process."""
         self.is_running = False
+        if self._read_task and not self._read_task.done():
+            self._read_task.cancel()
+        if self._stderr_task and not self._stderr_task.done():
+            self._stderr_task.cancel()
         if self.process:
-            try:
-                self.process.terminate()
-            except Exception:
-                pass
+            kill_process_tree(self.process)

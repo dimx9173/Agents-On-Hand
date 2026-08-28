@@ -67,6 +67,7 @@ AVAILABLE_CLI_AGENTS = {
     "pi": {"name": "Pi Agent", "command": "pi", "drivers": ["pi_rpc", "pty"], "use_acp": False},
     "omp": {"name": "OMP (Oh My Pi)", "command": "omp acp", "drivers": ["acp", "pty"], "use_acp": True},
     "opencode": {"name": "OpenCode CLI", "command": "opencode acp", "drivers": ["acp", "pty"], "use_acp": True},
+    "prime": {"name": "Prime Agent", "command": "prime-agent --mode acp", "drivers": ["acp", "pi_rpc", "pty"], "use_acp": True},
     "bash": {"name": "Bash Shell", "command": "bash", "drivers": ["pty"], "use_acp": False},
 }
 
@@ -89,6 +90,10 @@ def get_installed_cli_agents(*, use_cache: bool = True) -> dict:
         exec_name = cmd.split()[0]
         if shutil.which(exec_name) is not None:
             installed[key] = info
+        elif key == "prime" and shutil.which("prime") is not None:
+            inst = dict(info)
+            inst["command"] = "prime --mode acp"
+            installed[key] = inst
     _installed_cache = installed
     _installed_cache_ts = now
     return installed

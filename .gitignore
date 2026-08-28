@@ -4,6 +4,9 @@
 response.xml
 bitbucket.log
 .agents-on-hand/
+.claude/
+.sisyphus/
+
 
 # Byte-compiled / optimized / DLL files
 

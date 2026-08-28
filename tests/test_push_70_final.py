@@ -34,29 +34,13 @@ async def test_session_menu_prune_with_remaining(tmp_path):
         await session_action_callback_handler(update, MagicMock())
         assert q.edit_message_text.called or q.answer.called
 
-def test_acp_session_branches(tmp_path):
-    """Cover acp_session 85-92: extract and handle."""
-    from agents_on_hand.acp_session import extract_acp_text_delta, ACPSession
+def test_acp_extract_branches(tmp_path):
+    """Cover acp_driver extract branches."""
+    from agents_on_hand.drivers.acp_driver import extract_acp_text_delta
     # hit all extract branches
     assert extract_acp_text_delta({"content": {"text": "x"}}) == "x"
     assert extract_acp_text_delta({"update": {"delta": "y"}}) == "y"
-    assert extract_acp_text_delta({"content": 123}) == "123"
-    sess = ACPSession(session_id="s_acp_85", user_id=1, agent_key="omp", agent_name="OMP", command="omp acp", working_dir=tmp_path)
-    # cover handle branches via direct call if exists
-    for meth in ["_on_acp_update", "_handle_update", "_on_text_delta"]:
-        if hasattr(sess, meth):
-            try:
-                getattr(sess, meth)({"content": "hello"})
-            except Exception:
-                pass
-    # cover session log branches
-    sess.log_file_path.write_text("a\nb\nc\nd")
-    assert "d" in sess.get_last_n_lines(1)
-    assert "a" in sess.get_last_n_lines(100)
-    try:
-        sess.stop()
-    except Exception:
-        pass
+    assert extract_acp_text_delta({"content": 123}) == ""
 
 @pytest.mark.asyncio
 async def test_app_main_with_token_and_whitelist(monkeypatch):

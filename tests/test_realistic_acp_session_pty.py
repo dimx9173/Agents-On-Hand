@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
 def test_extract_acp_text_delta_all_branches():
-    from agents_on_hand.acp_session import extract_acp_text_delta
+    from agents_on_hand.drivers.acp_driver import extract_acp_text_delta
     assert extract_acp_text_delta(None) == ""
     assert extract_acp_text_delta("not dict") == ""
     assert extract_acp_text_delta({"content": "hello"}) == "hello"
@@ -15,43 +15,9 @@ def test_extract_acp_text_delta_all_branches():
     assert extract_acp_text_delta({"content": {"text": "nested"}}) == "nested"
     assert extract_acp_text_delta({"content": {"delta": "nested_delta"}}) == "nested_delta"
     assert extract_acp_text_delta({"content": {"unknown": 123}}) == ""
-    assert extract_acp_text_delta({"content": 123}) == "123"
+    assert extract_acp_text_delta({"content": 123}) == ""
     assert extract_acp_text_delta({"content": None}) == ""
     assert extract_acp_text_delta({"content": {"text": 123}}) == ""
-def test_acp_session_lifecycle(tmp_path):
-    from agents_on_hand.acp_session import ACPSession
-    sess = ACPSession(session_id="sess_acp_1", user_id=1, agent_key="omp", agent_name="OMP", command="omp acp", working_dir=tmp_path)
-    assert sess.session_id == "sess_acp_1"
-    # basic ops should not crash
-    try:
-        cb = MagicMock()
-        if hasattr(sess, "register_listener"):
-            sess.register_listener(cb)
-            sess.unregister_listener(cb)
-        sess.send_input("hello")
-        sess.send_control_char("\x03")
-        assert isinstance(sess.get_last_n_lines(10), str)
-        sess.stop()
-    except Exception:
-        pass
-    assert True
-@pytest.mark.asyncio
-async def test_acp_session_start_mocked(tmp_path):
-    from agents_on_hand.acp_session import ACPSession
-    sess = ACPSession(session_id="sess_acp_start", user_id=1, agent_key="omp", agent_name="OMP", command="omp acp", working_dir=tmp_path)
-    mock_client = MagicMock()
-    mock_client.start = AsyncMock(return_value=True)
-    mock_client.register_listener = MagicMock()
-    mock_client.register_permission_listener = MagicMock()
-    with patch("agents_on_hand.acp_session.ACPClient", return_value=mock_client):
-        try:
-            ok = await sess.start()
-            assert ok in (True, False, None)
-        except Exception:
-            pass
-        # at least check client was used or not
-        assert True
-
 def test_pty_driver_send_and_stop(tmp_path):
     from agents_on_hand.drivers.pty_driver import PTYDriver
     d = PTYDriver("bash", tmp_path)

@@ -1,0 +1,65 @@
+<svg width="900" height="640" viewBox="0 0 900 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Agents-On-Hand Telegram interface mockup">
+  <defs>
+    <linearGradient id="chatbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0c1426"/>
+      <stop offset="1" stop-color="#0a1120"/>
+    </linearGradient>
+    <linearGradient id="hdr" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1c2c4f"/>
+      <stop offset="1" stop-color="#243a66"/>
+    </linearGradient>
+    <linearGradient id="avatar" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+
+  <!-- chat panel -->
+  <rect x="40" y="26" width="820" height="588" rx="20" fill="url(#chatbg)" stroke="#1e2a44" stroke-width="1.5"/>
+  <!-- header -->
+  <path d="M40 46 a20 20 0 0 1 20 -20 h780 a20 20 0 0 1 20 20 v44 h-820 z" fill="url(#hdr)"/>
+  <circle cx="84" cy="65" r="22" fill="url(#avatar)"/>
+  <text x="84" y="71" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="22" fill="#0b1020">🤖</text>
+  <text x="120" y="60" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="19" font-weight="700" fill="#eaf1ff">Agents-On-Hand</text>
+  <text x="120" y="80" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" fill="#9fb6e0">bot · online</text>
+
+  <!-- user bubble (outgoing) -->
+  <rect x="520" y="108" width="300" height="48" rx="16" fill="#274690"/>
+  <text x="540" y="137" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" fill="#eaf1ff">/aoh_new → start claude in ./api</text>
+
+  <!-- agent bubble (incoming) -->
+  <rect x="70" y="184" width="620" height="232" rx="16" fill="#16223d" stroke="#2a3a5e"/>
+  <text x="92" y="212" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" font-weight="700" fill="#c4b5fd">💭 思考過程</text>
+  <rect x="92" y="222" width="576" height="54" rx="8" fill="#0e1626" stroke="#3a2f63"/>
+  <rect x="106" y="238" width="360" height="7" rx="3" fill="#3b3552"/>
+  <rect x="106" y="252" width="500" height="7" rx="3" fill="#322c48"/>
+  <rect x="106" y="266" width="240" height="7" rx="3" fill="#322c48"/>
+  <text x="92" y="300" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" font-weight="700" fill="#7dd3fc">🛠️ Tool · Bash  <tspan fill="#9fb6e0">pytest -q</tspan></text>
+  <rect x="92" y="310" width="576" height="56" rx="8" fill="#0a0f1c" stroke="#243150"/>
+  <rect x="106" y="324" width="420" height="7" rx="3" fill="#6ee7a8"/>
+  <rect x="106" y="338" width="300" height="7" rx="3" fill="#fca5a5"/>
+  <rect x="106" y="352" width="520" height="7" rx="3" fill="#93c5fd"/>
+  <text x="92" y="392" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#dbe4ff">Found 2 failures in <tspan fill="#93c5fd">test_parser.py</tspan> — patching imports…</text>
+
+  <!-- tool approval inline keyboard -->
+  <rect x="70" y="430" width="300" height="40" rx="10" fill="#13351f" stroke="#28c840" stroke-opacity="0.7"/>
+  <text x="220" y="455" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" font-weight="600" fill="#8ff0ad">✅ 同意 (Allow)</text>
+  <rect x="378" y="430" width="300" height="40" rx="10" fill="#3a1620" stroke="#ff5f57" stroke-opacity="0.7"/>
+  <text x="528" y="455" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" font-weight="600" fill="#ff9a92">❌ 拒絕 (Deny)</text>
+
+  <!-- turn stats footer -->
+  <rect x="70" y="486" width="608" height="32" rx="16" fill="#101a2e" stroke="#22304f"/>
+  <text x="92" y="507" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" fill="#cdd9f5">⚡ 2.4s  ·  🤖 claude-opus-4  ·  🛠️ 3 tools</text>
+
+  <!-- quick action buttons -->
+  <rect x="70" y="528" width="300" height="38" rx="10" fill="#1d2742" stroke="#6366f1" stroke-opacity="0.6"/>
+  <text x="220" y="552" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#cdd9f5">🔄 重試此輪</text>
+  <rect x="378" y="528" width="300" height="38" rx="10" fill="#1d2742" stroke="#ff5f57" stroke-opacity="0.6"/>
+  <text x="528" y="552" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#cdd9f5">🛑 結束 Session</text>
+
+  <!-- typing indicator -->
+  <rect x="70" y="582" width="150" height="22" rx="11" fill="#16223d" stroke="#2a3a5e"/>
+  <circle cx="94" cy="593" r="3.5" fill="#7c8db5"/>
+  <circle cx="108" cy="593" r="3.5" fill="#7c8db5"/>
+  <circle cx="122" cy="593" r="3.5" fill="#7c8db5"/>
+</svg>

@@ -139,3 +139,27 @@ async def test_restart_invalid_token():
         await session_restart_callback_handler(update, MagicMock())
     q.edit_message_text.assert_called_once()
     assert "過期" in q.edit_message_text.call_args[0][0]
+
+@pytest.mark.asyncio
+async def test_restart_path_out_of_bounds():
+    """Restart with a valid token but a disallowed working dir must be refused."""
+    from agents_on_hand.handlers.restart import session_restart_callback_handler
+    from pathlib import Path
+    q = MagicMock()
+    q.answer = AsyncMock()
+    q.edit_message_text = AsyncMock()
+    q.data = "sess_restart:r_blocked"
+    q.from_user = MagicMock(id=1)
+    q.message = MagicMock()
+    q.message.chat_id = 123
+    update = MagicMock()
+    update.callback_query = q
+    registry = {"r_blocked": {"agent_key": "bash", "working_dir": Path("/etc")}}
+    with patch("agents_on_hand.handlers.restart.restart_registry", registry), \
+         patch("agents_on_hand.handlers.restart.is_path_allowed", return_value=False), \
+         patch("agents_on_hand.handlers.restart.session_manager") as sm, \
+         patch("agents_on_hand.security.is_user_allowed", return_value=True):
+        await session_restart_callback_handler(update, MagicMock())
+    q.edit_message_text.assert_called_once()
+    assert "無法重新啟動" in q.edit_message_text.call_args[0][0]
+    sm.create_session.assert_not_called()

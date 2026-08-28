@@ -1,23 +1,30 @@
 """
 Unified Streamer for Agents-On-Hand Telegram Bot.
-Handles standardized DriverEvent payloads (Text, Thought, Tool Requests, Exit).
+Handles standardized DriverEvent payloads (Text, Thought, Tool Requests, Exit)
+with modern Telegram HTML formatting, expandable blockquotes, and turn summaries.
 """
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import BadRequest
 
-from .ansi_cleaner import format_hermes_style
+from .ansi_cleaner import (
+    escape_html,
+    format_hermes_html,
+    format_hermes_style,
+    split_html_into_chunks,
+)
 from .drivers.base_driver import DriverEvent
 
 logger = logging.getLogger(__name__)
 
 
 def split_text_into_chunks(text: str, max_chars: int = 3800) -> list[str]:
-    """Split text into chunks smaller than max_chars for Telegram safe delivery."""
+    """Split text into chunks smaller than max_chars for Telegram safe delivery (backward-compatible helper)."""
     if not text:
         return []
     chunks = []
@@ -32,11 +39,17 @@ def split_text_into_chunks(text: str, max_chars: int = 3800) -> list[str]:
     return chunks
 
 
+def _strip_html_tags(text: str) -> str:
+    """Helper to strip HTML tags for plain-text fallback delivery."""
+    clean = re.sub(r'<[^>]+>', '', text)
+    return clean.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&quot;', '"')
+
+
 class UnifiedStreamer:
     """
     Unified Live Streamer for all Agent Sessions and Protocols.
-    Renders streaming response text, thinking sections, tool execution badges,
-    and Telegram Inline Keyboards for Tool Approval requests.
+    Renders streaming response text, expandable thinking sections (<blockquote expandable>),
+    tool execution badges, and Telegram Inline Keyboards for Tool Approval & Quick Actions.
     """
 
     def __init__(
@@ -53,10 +66,15 @@ class UnifiedStreamer:
 
         self.current_text: str = ""
         self.current_thought: str = ""
+        self.tool_results: list[dict[str, Any]] = []
+        self._tool_count: int = 0
         self.current_msg_id: int | None = None
 
         self._is_active: bool = False
         self._last_edit_time: float = 0.0
+        self._turn_start_time: float = 0.0
+        self._is_turn_final: bool = False
+
         self._typing_task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
         self._trailing_flush_task: asyncio.Task | None = None
@@ -92,9 +110,17 @@ class UnifiedStreamer:
             )
         self.current_text = ""
         self.current_thought = ""
+        self.tool_results = []
+        self._tool_count = 0
         self.current_msg_id = None
+        self._is_turn_final = False
         self._pending_tool_req_ids.clear()
         self._cancel_wait_indicator()
+
+        try:
+            self._turn_start_time = asyncio.get_running_loop().time()
+        except RuntimeError:
+            self._turn_start_time = 0.0
 
         if self._typing_task is None or self._typing_task.done():
             self._typing_task = asyncio.create_task(self._typing_loop())
@@ -107,7 +133,7 @@ class UnifiedStreamer:
             await asyncio.sleep(4.0)
             async with self._lock:
                 if not self.current_text and not self.current_thought and self._is_active:
-                    waiting_msg = "⏳ *Agent 正在思考與處理中，請稍候...*"
+                    waiting_msg = "⏳ <b>Agent 正在思考與處理中，請稍候...</b>"
                     self.current_msg_id = await self._deliver(waiting_msg, self.current_msg_id)
         except asyncio.CancelledError:
             pass
@@ -162,9 +188,20 @@ class UnifiedStreamer:
             self._on_tool_request(event.request_id, event.tool_name, event.tool_args)
 
         elif e_type == DriverEvent.TOOL_RESULT:
-            content_str = str(event.content).strip().replace("`", "'")
+            self._tool_count += 1
+            content_str = str(event.content).strip()
             preview = (content_str[:80] + "...") if len(content_str) > 80 else content_str
-            self.current_text += f"\n🛠️ *Tool ({event.tool_name})*: `{preview}`\n"
+            self.tool_results.append({
+                "tool_name": event.tool_name,
+                "content": content_str,
+                "preview": preview,
+            })
+            self._stop_typing()
+            asyncio.create_task(self._schedule_edit())
+
+        elif e_type in (DriverEvent.TURN_END, DriverEvent.EXIT):
+            self._is_turn_final = True
+            self._stop_typing()
             asyncio.create_task(self._schedule_edit())
 
     def _on_tool_request(self, req_id: Any, tool_name: str, tool_args: Any):
@@ -176,11 +213,11 @@ class UnifiedStreamer:
         if req_key:
             self._pending_tool_req_ids.add(req_key)
 
-        detail_str = f"`{tool_name}`"
+        detail_str = f"<code>{escape_html(tool_name)}</code>"
         if tool_args:
-            detail_str += f"\n`{tool_args}`"
+            detail_str += f"\n<code>{escape_html(str(tool_args))}</code>"
 
-        text = f"🛡️ *Tool 執行審核請求*\nAgent 要求執行以下工具：\n{detail_str}\n\n請選擇是否授權："
+        text = f"🛡️ <b>Tool 執行審核請求</b>\nAgent 要求執行以下工具：\n{detail_str}\n\n請選擇是否授權："
 
         reply_markup = InlineKeyboardMarkup([
             [
@@ -195,7 +232,7 @@ class UnifiedStreamer:
                     chat_id=self.chat_id,
                     text=text,
                     reply_markup=reply_markup,
-                    parse_mode="Markdown",
+                    parse_mode="HTML",
                 )
             except Exception as e:
                 logger.warning(f"Error sending tool request message: {e}")
@@ -216,7 +253,10 @@ class UnifiedStreamer:
         accumulated text always reaches Telegram.
         """
         async with self._lock:
-            now = asyncio.get_running_loop().time()
+            try:
+                now = asyncio.get_running_loop().time()
+            except RuntimeError:
+                now = 0.0
             remaining = self.edit_interval - (now - self._last_edit_time)
             if remaining > 0:
                 if self._trailing_flush_task is None or self._trailing_flush_task.done():
@@ -238,37 +278,54 @@ class UnifiedStreamer:
         except asyncio.CancelledError:
             pass
 
-    @staticmethod
-    def _render_content(text: str, thought: str) -> str:
-        """Render accumulated text/thought into Telegram-ready Markdown."""
-        full_content = text
-        if thought:
-            thought_block = f"💭 *Thinking...*\n```\n{thought.strip()}\n```\n\n"
-            full_content = thought_block + full_content
-        return format_hermes_style(full_content)
+    def _render_content(self, text: str, thought: str, is_final: bool = False) -> str:
+        """Render accumulated text/thought into modern Telegram-friendly HTML."""
+        duration: float | None = None
+        if is_final and self._turn_start_time > 0:
+            try:
+                duration = asyncio.get_running_loop().time() - self._turn_start_time
+            except RuntimeError:
+                duration = None
 
-    async def _deliver_single(self, formatted: str, msg_id: int | None) -> int | None:
-        """Send or edit a single Telegram message with Markdown fallback.
+        agent_name = getattr(self.session, "agent_name", "")
+        return format_hermes_html(
+            text=text,
+            thought=thought,
+            tool_results=self.tool_results if self.tool_results else None,
+            is_final=is_final,
+            duration=duration,
+            agent_name=agent_name,
+            tool_count=self._tool_count,
+        )
+
+    async def _deliver_single(self, formatted: str, msg_id: int | None, reply_markup: Any = None) -> int | None:
+        """Send or edit a single Telegram message with HTML & Plaintext fallback.
 
         Returns the message_id of the streaming message, or None on failure.
         """
         logger.info(f"Streamer _deliver: msg_id={msg_id} chars={len(formatted)} to chat {self.chat_id}")
+        kwargs: dict[str, Any] = {"parse_mode": "HTML"}
+        if reply_markup is not None:
+            kwargs["reply_markup"] = reply_markup
+
         if msg_id is None:
             try:
                 msg = await self.bot.send_message(
                     chat_id=self.chat_id,
                     text=formatted,
-                    parse_mode="Markdown",
+                    **kwargs,
                 )
                 logger.info(f"Streamer _deliver: sent new msg_id={msg.message_id}")
                 return msg.message_id
             except BadRequest as e:
-                logger.info(f"Streamer _deliver: Markdown failed, retry plain: {e}")
-                # Markdown parse failure: retry as plain text
+                logger.info(f"Streamer _deliver: HTML parse failed, retry plain: {e}")
+                plain_text = _strip_html_tags(formatted)
                 try:
+                    plain_kwargs = {"reply_markup": reply_markup} if reply_markup else {}
                     msg = await self.bot.send_message(
                         chat_id=self.chat_id,
-                        text=formatted,
+                        text=plain_text,
+                        **plain_kwargs,
                     )
                     return msg.message_id
                 except Exception as plain_err:
@@ -282,19 +339,22 @@ class UnifiedStreamer:
                 chat_id=self.chat_id,
                 message_id=msg_id,
                 text=formatted,
-                parse_mode="Markdown",
+                **kwargs,
             )
             return msg_id
         except BadRequest as e:
             err_str = str(e).lower()
             if "not modified" in err_str:
                 return msg_id
-            # Markdown parse failure: retry as plain text
+            logger.info(f"Streamer _deliver: HTML edit failed, retry plain: {e}")
+            plain_text = _strip_html_tags(formatted)
             try:
+                plain_kwargs = {"reply_markup": reply_markup} if reply_markup else {}
                 await self.bot.edit_message_text(
                     chat_id=self.chat_id,
                     message_id=msg_id,
-                    text=formatted,
+                    text=plain_text,
+                    **plain_kwargs,
                 )
                 return msg_id
             except BadRequest as retry_err:
@@ -311,10 +371,10 @@ class UnifiedStreamer:
     async def _flush_previous_turn(self, text: str, thought: str, msg_id: int):
         """Best-effort final edit/send of the previous turn's message before reset."""
         try:
-            formatted = self._render_content(text, thought)
+            formatted = self._render_content(text, thought, is_final=True)
             if not formatted.strip():
                 return
-            chunks = split_text_into_chunks(formatted, max_chars=3800)
+            chunks = split_html_into_chunks(formatted, max_chars=3800)
             if not chunks:
                 return
             await self._deliver_single(chunks[0], msg_id)
@@ -325,33 +385,48 @@ class UnifiedStreamer:
 
     async def _flush_edit_locked(self):
         """Render and send/edit the Telegram message with automatic multi-message pagination."""
-        self._last_edit_time = asyncio.get_running_loop().time()
+        try:
+            self._last_edit_time = asyncio.get_running_loop().time()
+        except RuntimeError:
+            self._last_edit_time = 0.0
 
-        formatted = self._render_content(self.current_text, self.current_thought)
+        formatted = self._render_content(self.current_text, self.current_thought, is_final=self._is_turn_final)
         if not formatted.strip():
             return
 
-        # If content exceeds safe limit, finalize current message and roll over to a new message
-        while len(formatted) > 3800:
-            split_idx = formatted.rfind('\n', 0, 3800)
-            if split_idx <= 0:
-                split_idx = 3800
-            head_chunk = formatted[:split_idx]
-            tail_chunk = formatted[split_idx:].lstrip('\n')
+        chunks = split_html_into_chunks(formatted, max_chars=3800)
+        if not chunks:
+            return
 
-            # Finalize current message with head_chunk
-            await self._deliver_single(head_chunk, self.current_msg_id)
+        action_markup = None
+        if self._is_turn_final:
+            action_markup = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🔄 重試此輪", callback_data=f"sess:retry:{self.session.session_id}"),
+                    InlineKeyboardButton("🛑 結束 Session", callback_data=f"sess:kill:{self.session.session_id}"),
+                ]
+            ])
 
-            # Advance state to new message
-            self.current_msg_id = None
-            self.current_thought = ""  # Thought is preserved in the head_chunk
-            self.current_text = tail_chunk
-            formatted = self._render_content(self.current_text, self.current_thought)
+        # Single chunk message (most common)
+        if len(chunks) == 1:
+            self.current_msg_id = await self._deliver_single(
+                chunks[0], self.current_msg_id, reply_markup=action_markup
+            )
+            return
 
-        if formatted.strip():
-            self.current_msg_id = await self._deliver_single(formatted, self.current_msg_id)
+        # Multi-chunk pagination (text > 3800 chars)
+        for i, chunk in enumerate(chunks):
+            is_last = (i == len(chunks) - 1)
+            chunk_markup = action_markup if (is_last and self._is_turn_final) else None
+
+            if i == 0:
+                self.current_msg_id = await self._deliver_single(
+                    chunk, self.current_msg_id, reply_markup=chunk_markup
+                )
+            else:
+                await self._deliver_single(chunk, None, reply_markup=chunk_markup)
 
 
-# Compatibility Aliases for bot.py and tests
+# Compatibility Alias for bot.py and tests
 DirectChatStreamer = UnifiedStreamer
-ACPStreamer = UnifiedStreamer
+

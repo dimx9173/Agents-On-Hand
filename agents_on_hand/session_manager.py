@@ -78,6 +78,7 @@ class AgentSession:
         self._response_start_time: float | None = None
         self._first_token_time: float | None = None
         self._response_chars: int = 0
+        self.last_user_prompt: str = ""
 
         # One-shot background completion callback.
         # Set by bot when user switches away from this session while it is still
@@ -196,6 +197,7 @@ class AgentSession:
     def send_input(self, text: str):
         """Send prompt to active driver."""
         if self.driver and self.is_running:
+            self.last_user_prompt = text
             self.trace.user_input(text)
             # Record user prompt in log file for complete conversation history
             try:
@@ -422,5 +424,21 @@ class SessionManager:
             self._save_to_store()
         return count
 
+    def shutdown_all_sessions(self) -> int:
+        """Cleanly terminate all running sessions and their process trees on shutdown/exit."""
+        count = 0
+        for session in list(self.sessions.values()):
+            if session.is_running:
+                try:
+                    session.stop()
+                    count += 1
+                except Exception as e:
+                    logger.error(f"Error stopping session {session.session_id} during shutdown: {e}")
+        if count > 0:
+            logger.info(f"Shutdown cleaned up {count} active agent sessions.")
+        return count
+
 
 session_manager = SessionManager()
+import atexit
+atexit.register(session_manager.shutdown_all_sessions)

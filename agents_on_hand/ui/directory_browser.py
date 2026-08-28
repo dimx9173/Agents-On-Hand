@@ -83,10 +83,16 @@ async def directory_callback_handler(update: Update, context: ContextTypes.DEFAU
         else:
             path_token, page = rest, 0
         target_path = resolve_path_token(path_token)
+        if target_path is None:
+            await query.answer("⛔ 路徑已過期，請重新選擇。", show_alert=True)
+            return
         await send_directory_browser(update, context, target_path, page=page)
     elif data.startswith("dir:select:"):
         path_token = data[len("dir:select:"):]
         target_path = resolve_path_token(path_token)
+        if target_path is None:
+            await query.answer("⛔ 路徑已過期，請重新選擇。", show_alert=True)
+            return
         await show_agent_selector(query, target_path)
 
 
@@ -118,6 +124,10 @@ async def agent_start_callback_handler(update, context):  # type: ignore[no-unty
         return
     path_token, agent_key = parts[2], parts[3]
     working_dir = resolve_path_token(path_token)
+    # Defense-in-depth: re-validate the resolved path before spawning a process
+    if working_dir is None or not is_path_allowed(working_dir):
+        await query.edit_message_text("⛔ *無法啟動*：工作目錄無效或超出允許範圍。", parse_mode="Markdown")
+        return
     if user_id in active_streamers:
         active_streamers[user_id].stop()
         del active_streamers[user_id]

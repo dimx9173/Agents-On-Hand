@@ -42,7 +42,7 @@ async def test_journey_new_session_via_directory_browser(tmp_path):
     q.edit_message_text.assert_called_once()
     assert "已安裝" in q.edit_message_text.call_args[0][0] or "檢測不到" in q.edit_message_text.call_args[0][0]
     # start agent
-    with patch("agents_on_hand.ui.directory_browser.session_manager") as sm, patch("agents_on_hand.ui.directory_browser.create_streamer_for_session") as mk_streamer, patch("agents_on_hand.ui.directory_browser.resolve_path_token", return_value=tmp_path), patch("agents_on_hand.ui.directory_browser.active_streamers", {}):
+    with patch("agents_on_hand.ui.directory_browser.session_manager") as sm, patch("agents_on_hand.ui.directory_browser.create_streamer_for_session") as mk_streamer, patch("agents_on_hand.ui.directory_browser.resolve_path_token", return_value=tmp_path), patch("agents_on_hand.ui.directory_browser.is_path_allowed", return_value=True), patch("agents_on_hand.ui.directory_browser.active_streamers", {}):
         mock_sess = _make_mock_session("sess_new", "Bash", True)
         sm.create_session.return_value = mock_sess
         q2 = MagicMock()
@@ -198,7 +198,7 @@ async def test_journey_background_finish_and_restart(tmp_path):
         on_background_session_finished(sess)
         await asyncio.sleep(0.1)
     # restart with valid token
-    with patch("agents_on_hand.handlers.restart.restart_registry", {"r_test1234": {"agent_key": "bash", "working_dir": tmp_path}}), patch("agents_on_hand.handlers.restart.session_manager") as sm, patch("agents_on_hand.handlers.restart.create_streamer_for_session") as mk_streamer, patch("agents_on_hand.security.is_user_allowed", return_value=True):
+    with patch("agents_on_hand.handlers.restart.restart_registry", {"r_test1234": {"agent_key": "bash", "working_dir": tmp_path}}), patch("agents_on_hand.handlers.restart.session_manager") as sm, patch("agents_on_hand.handlers.restart.create_streamer_for_session") as mk_streamer, patch("agents_on_hand.handlers.restart.is_path_allowed", return_value=True), patch("agents_on_hand.security.is_user_allowed", return_value=True):
         mock_sess = _make_mock_session("sess_new2", "Bash", True)
         sm.create_session.return_value = mock_sess
         q = MagicMock()

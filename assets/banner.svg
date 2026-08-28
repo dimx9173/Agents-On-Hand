@@ -1,0 +1,81 @@
+<svg width="1200" height="420" viewBox="0 0 1200 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Agents-On-Hand banner">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset="0.55" stop-color="#101a33"/>
+      <stop offset="1" stop-color="#1a1338"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#6366f1" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e2e8ff"/>
+      <stop offset="1" stop-color="#9be8ff"/>
+    </linearGradient>
+    <linearGradient id="term" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0f1626"/>
+      <stop offset="1" stop-color="#0a0f1c"/>
+    </linearGradient>
+    <pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse">
+      <path d="M34 0H0V34" fill="none" stroke="#9fb3ff" stroke-opacity="0.06" stroke-width="1"/>
+    </pattern>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="38"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="420" fill="url(#bg)"/>
+  <rect width="1200" height="420" fill="url(#grid)"/>
+  <circle cx="250" cy="120" r="190" fill="url(#glowA)" filter="url(#soft)"/>
+  <circle cx="980" cy="320" r="220" fill="url(#glowB)" filter="url(#soft)"/>
+
+  <!-- Left: title block -->
+  <text x="64" y="150" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="62" font-weight="800" fill="url(#title)">Agents-On-Hand</text>
+  <text x="66" y="196" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="25" font-weight="500" fill="#c7d2fe">Orchestrate your local AI coding agents from Telegram</text>
+
+  <!-- Pill tags -->
+  <g font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600">
+    <rect x="66" y="232" rx="20" ry="20" width="168" height="40" fill="#1d2742" stroke="#6366f1" stroke-opacity="0.6"/>
+    <circle cx="92" cy="252" r="6" fill="#6366f1"/>
+    <text x="108" y="258" fill="#dbe4ff">Security-first</text>
+
+    <rect x="248" y="232" rx="20" ry="20" width="170" height="40" fill="#1d2742" stroke="#22d3ee" stroke-opacity="0.6"/>
+    <circle cx="274" cy="252" r="6" fill="#22d3ee"/>
+    <text x="290" y="258" fill="#dbe4ff">ACP + PTY</text>
+
+    <rect x="432" y="232" rx="20" ry="20" width="182" height="40" fill="#1d2742" stroke="#a78bfa" stroke-opacity="0.6"/>
+    <circle cx="458" cy="252" r="6" fill="#a78bfa"/>
+    <text x="474" y="258" fill="#dbe4ff">Multi-agent</text>
+  </g>
+
+  <!-- Right: terminal window mock -->
+  <g transform="translate(720,70)">
+    <rect x="0" y="0" width="430" height="290" rx="16" fill="url(#term)" stroke="#2a3556" stroke-width="1.5"/>
+    <rect x="0" y="0" width="430" height="42" rx="16" fill="#121a2e"/>
+    <rect x="0" y="26" width="430" height="16" fill="#121a2e"/>
+    <circle cx="24" cy="21" r="6" fill="#ff5f57"/>
+    <circle cx="44" cy="21" r="6" fill="#febc2e"/>
+    <circle cx="64" cy="21" r="6" fill="#28c840"/>
+    <text x="215" y="26" text-anchor="middle" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#8aa0c8">aoh · telegram session</text>
+
+    <!-- user msg -->
+    <rect x="120" y="62" width="290" height="34" rx="12" fill="#2b3a63"/>
+    <text x="140" y="84" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#e6edff">/aoh_new  →  fix the parser</text>
+    <!-- agent label -->
+    <text x="22" y="124" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#7c8db5">claude · streaming…</text>
+    <rect x="20" y="134" width="380" height="58" rx="12" fill="#0e1626" stroke="#243150"/>
+    <rect x="34" y="150" width="240" height="9" rx="4" fill="#3b4a73"/>
+    <rect x="34" y="168" width="320" height="9" rx="4" fill="#2f3d63"/>
+    <rect x="34" y="186" width="150" height="9" rx="4" fill="#2f3d63"/>
+    <!-- tool approval inline kb -->
+    <rect x="20" y="204" width="180" height="34" rx="10" fill="#13351f" stroke="#28c840" stroke-opacity="0.7"/>
+    <text x="110" y="226" text-anchor="middle" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#7ef0a0">✓ Allow tool</text>
+    <rect x="210" y="204" width="170" height="34" rx="10" fill="#3a1620" stroke="#ff5f57" stroke-opacity="0.7"/>
+    <text x="295" y="226" text-anchor="middle" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#ff9a92">✕ Deny</text>
+  </g>
+</svg>

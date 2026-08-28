@@ -1,0 +1,69 @@
+<svg width="900" height="600" viewBox="0 0 900 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Agents-On-Hand architecture diagram">
+  <defs>
+    <linearGradient id="layer" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#16213d"/>
+      <stop offset="1" stop-color="#1b2a4d"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 z" fill="#7c8db5"/>
+    </marker>
+    <marker id="arrowg" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 z" fill="#22d3ee"/>
+    </marker>
+  </defs>
+
+  <text x="450" y="22" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" font-weight="700" fill="#9fb6e0">Agents-On-Hand · layered architecture</text>
+
+  <!-- User -->
+  <rect x="350" y="40" width="200" height="54" rx="14" fill="url(#layer)" stroke="#3a4a73"/>
+  <text x="450" y="73" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="16" font-weight="700" fill="#eaf1ff">🧑 Telegram User</text>
+
+  <!-- Orchestration -->
+  <rect x="210" y="130" width="480" height="62" rx="14" fill="url(#layer)" stroke="#3a4a73"/>
+  <text x="450" y="158" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" font-weight="700" fill="#eaf1ff">bot.py / app.py</text>
+  <text x="450" y="178" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9fb6e0">command &amp; callback handlers · @restricted user whitelist</text>
+
+  <!-- Session -->
+  <rect x="190" y="232" width="520" height="62" rx="14" fill="url(#layer)" stroke="#3a4a73"/>
+  <text x="450" y="260" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" font-weight="700" fill="#eaf1ff">session_manager</text>
+  <text x="450" y="280" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9fb6e0">Probing Chain (ACP ▸ RPC ▸ PTY) · lifecycle · state.json persistence</text>
+
+  <!-- Drivers row -->
+  <g font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="13" font-weight="700" text-anchor="middle">
+    <rect x="120" y="328" width="150" height="56" rx="12" fill="#13343f" stroke="#22d3ee" stroke-opacity="0.7"/>
+    <text x="195" y="352" fill="#bdf3ff">ACPDriver</text>
+    <text x="195" y="370" fill="#7fbfd0" font-size="11" font-weight="500">JSON-RPC 2.0 stdio</text>
+
+    <rect x="290" y="328" width="150" height="56" rx="12" fill="#1c2a4d" stroke="#6366f1" stroke-opacity="0.7"/>
+    <text x="365" y="352" fill="#cfd6ff">PiRPCDriver</text>
+    <text x="365" y="370" fill="#9aa3e0" font-size="11" font-weight="500">JSON event stream</text>
+
+    <rect x="460" y="328" width="150" height="56" rx="12" fill="#1c2a4d" stroke="#a78bfa" stroke-opacity="0.7"/>
+    <text x="535" y="352" fill="#e4dbff">ClaudeStream</text>
+    <text x="535" y="370" fill="#b9aee6" font-size="11" font-weight="500">Stream-JSON stdio</text>
+
+    <rect x="630" y="328" width="150" height="56" rx="12" fill="#1c2a4d" stroke="#f59e0b" stroke-opacity="0.7"/>
+    <text x="705" y="352" fill="#ffe2b0">PTYDriver</text>
+    <text x="705" y="370" fill="#d8b98a" font-size="11" font-weight="500">pexpect pseudo-terminal</text>
+  </g>
+
+  <!-- Render -->
+  <rect x="190" y="430" width="520" height="62" rx="14" fill="url(#layer)" stroke="#3a4a73"/>
+  <text x="450" y="458" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" font-weight="700" fill="#eaf1ff">UnifiedStreamer</text>
+  <text x="450" y="478" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#9fb6e0">Telegram HTML · expandable quotes · turn footer · quick actions</text>
+
+  <!-- API -->
+  <rect x="330" y="522" width="240" height="50" rx="14" fill="#16351f" stroke="#28c840" stroke-opacity="0.7"/>
+  <text x="450" y="552" text-anchor="middle" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" font-weight="700" fill="#bdf3cf">Telegram API (BotFather)</text>
+
+  <!-- arrows down -->
+  <line x1="450" y1="94" x2="450" y2="128" stroke="#7c8db5" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="450" y1="192" x2="450" y2="230" stroke="#7c8db5" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="450" y1="294" x2="450" y2="326" stroke="#7c8db5" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="450" y1="384" x2="450" y2="428" stroke="#7c8db5" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="450" y1="492" x2="450" y2="520" stroke="#7c8db5" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- feedback arrow right side -->
+  <path d="M580 547 C 700 547, 720 300, 600 250" fill="none" stroke="#22d3ee" stroke-width="2" stroke-dasharray="5 5" marker-end="url(#arrowg)"/>
+  <text x="700" y="410" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#22d3ee">DriverEvent stream</text>
+</svg>

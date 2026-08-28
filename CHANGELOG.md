@@ -8,6 +8,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Fail-closed path token resolution**: `resolve_path_token` no longer falls back to treating an unknown/evicted token as a raw path — it returns `None`, and directory navigation / agent start / session restart alert the user instead of acting on a bogus path.
+- **Path sandbox re-validation on spawn**: `agent:start` and `sess_restart` now re-check `is_path_allowed` on the working directory before spawning a process (defense in depth).
+- **Error handler no longer leaks exception internals** to the Telegram user (full details stay in the server log).
+- **Startup busy-wait reduced**: `text_message_router` waits at most ~3.2s for a starting session (was 10s), then replies "session still starting" instead of blocking silently.
+
+### Removed
+- Dead `acp_session.py` / `acp_streamer.py` modules (superseded by the unified `AgentSession` + `ACPDriver`); tests redirected to the production `acp_driver.extract_acp_text_delta`.
+- Empty `p_5/` directory and the unused `ACPStreamer` alias.
+
+### Docs
+- README test count and `docs/ARCHITECTURE.md` module table synced with the current codebase.
+
 ## [1.2.0] — 2026-08-21
 
 ### Added

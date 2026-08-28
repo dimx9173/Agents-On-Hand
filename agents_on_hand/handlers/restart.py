@@ -6,6 +6,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from ..callback_registry import register_restart_info, restart_registry
+from ..config import is_path_allowed
 from ..runtime import active_streamers, bot_app, create_streamer_for_session
 from ..security import restricted
 from ..session_manager import session_manager
@@ -51,6 +52,10 @@ async def session_restart_callback_handler(update: Update, context: ContextTypes
         return
     agent_key = info["agent_key"]
     working_dir = info["working_dir"]
+    # Defense-in-depth: re-validate the working dir before respawning a process
+    if not is_path_allowed(working_dir):
+        await query.edit_message_text("⛔ *無法重新啟動*：工作目錄超出允許範圍。", parse_mode="Markdown")
+        return
     user_id = query.from_user.id
     session = session_manager.create_session(user_id=user_id, agent_key=agent_key, working_dir=working_dir)
     streamer = create_streamer_for_session(context.bot, query.message.chat_id, session)

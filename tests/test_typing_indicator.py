@@ -2,7 +2,6 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock
 
-from agents_on_hand.acp_streamer import ACPStreamer
 from agents_on_hand.stream_handler import DirectChatStreamer
 
 
@@ -35,7 +34,7 @@ class TestTypingIndicator(unittest.TestCase):
             bot_mock.send_chat_action = AsyncMock()
             session_mock = MagicMock()
 
-            streamer = ACPStreamer(bot=bot_mock, chat_id=12345, session=session_mock)
+            streamer = DirectChatStreamer(bot=bot_mock, chat_id=12345, session=session_mock)
             streamer.start()
 
             streamer.notify_user_input()

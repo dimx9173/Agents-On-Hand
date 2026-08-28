@@ -18,8 +18,8 @@ def test_callback_registry_tokens():
     assert resolve_path_token(t1) == p1.resolve()
     t2 = get_path_token(p1)
     assert t1 == t2
-    # raw fallback
-    assert resolve_path_token("nonexistent_token_xyz") == pathlib.Path("nonexistent_token_xyz").expanduser().resolve()
+    # fail-closed: unknown token -> None (no raw path fallback)
+    assert resolve_path_token("nonexistent_token_xyz") is None
 
 def test_restart_registry():
     tok = register_restart_info("bash", pathlib.Path("/tmp"))

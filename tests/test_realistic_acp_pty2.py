@@ -33,18 +33,6 @@ def test_pty_driver_basic(tmp_path):
     d.unregister_listener(cb)
     assert cb not in d._listeners
 
-def test_acp_session_basic(tmp_path):
-    from agents_on_hand.acp_session import ACPSession
-    try:
-        s = ACPSession(session_id="sess_acp_test", user_id=1, agent_key="omp", agent_name="OMP", command="omp acp", working_dir=tmp_path)
-        assert s.session_id == "sess_acp_test"
-        assert s.agent_name == "OMP"
-        # is_running initially False
-        assert hasattr(s, "is_running")
-    except Exception as e:
-        # if session requires different init, just check import works
-        assert True
-
 def test_logging_setup_levels(tmp_path, monkeypatch):
     from agents_on_hand.logging_setup import setup_logging
     # should not crash with different levels

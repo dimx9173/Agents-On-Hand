@@ -3,6 +3,8 @@ import json
 import logging
 import time
 
+from .process_utils import kill_process_tree, set_pdeathsig_and_pgrp
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,6 +46,7 @@ class ACPClient:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=self.working_dir,
+            preexec_fn=set_pdeathsig_and_pgrp,
             limit=10 * 1024 * 1024,  # 10MB line limit for large ACP JSON-RPC payloads
         )
 
@@ -241,8 +244,5 @@ class ACPClient:
         if self._read_task and not self._read_task.done():
             self._read_task.cancel()
         if self.process:
-            try:
-                self.process.terminate()
-            except Exception:
-                pass
+            kill_process_tree(self.process)
 

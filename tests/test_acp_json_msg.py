@@ -1,6 +1,6 @@
 """Cover ACP JSON handling — realistic responsible use cases."""
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch
 
 def test_acp_handle_json_msg_branches():
     from agents_on_hand.acp_client import ACPClient
@@ -27,13 +27,13 @@ def test_acp_handle_json_msg_branches():
     assert True
 
 def test_acp_extract_delta_comprehensive():
-    from agents_on_hand.acp_session import extract_acp_text_delta
+    from agents_on_hand.drivers.acp_driver import extract_acp_text_delta
     assert extract_acp_text_delta({"content": "a"}) == "a"
     assert extract_acp_text_delta({"delta": "b"}) == "b"
     assert extract_acp_text_delta({"update": {"content": "c"}}) == "c"
     assert extract_acp_text_delta({"content": {"text": "d"}}) == "d"
     assert extract_acp_text_delta({"content": {"delta": "e"}}) == "e"
-    assert extract_acp_text_delta({"content": 123}) == "123"
+    assert extract_acp_text_delta({"content": 123}) == ""
     assert extract_acp_text_delta({}) == ""
     assert extract_acp_text_delta(None) == ""
 
@@ -76,20 +76,21 @@ def test_pty_driver_listeners_and_send(tmp_path):
 @pytest.mark.asyncio
 async def test_session_manager_full_lifecycle(tmp_path):
     from agents_on_hand.session_manager import SessionManager
-    mgr = SessionManager(store_path=tmp_path / "state.json")
-    s1 = mgr.create_session(user_id=1, agent_key="bash", working_dir=tmp_path)
-    s2 = mgr.create_session(user_id=1, agent_key="bash", working_dir=tmp_path)
-    assert len(mgr.list_user_sessions(1)) == 2
-    assert mgr.get_active_session(1).session_id == s2.session_id
-    assert mgr.set_active_session(1, s1.session_id) is True
-    assert mgr.get_active_session(1).session_id == s1.session_id
-    # kill
-    assert mgr.kill_session(s1.session_id) is True
-    assert mgr.get_session(s1.session_id) is None
-    # prune offline (create offline)
-    from agents_on_hand.session_manager import AgentSession
-    s_off = AgentSession(session_id="off", user_id=2, agent_key="bash", agent_name="Bash", command="bash", working_dir=tmp_path)
-    s_off.is_running = False
-    mgr.sessions["off"] = s_off
-    mgr.user_active_session[2] = "off"
-    assert mgr.prune_offline_sessions(2) == 1
+    with patch("agents_on_hand.session_manager.AgentSession.start", new_callable=AsyncMock):
+        mgr = SessionManager(store_path=tmp_path / "state.json")
+        s1 = mgr.create_session(user_id=1, agent_key="bash", working_dir=tmp_path)
+        s2 = mgr.create_session(user_id=1, agent_key="bash", working_dir=tmp_path)
+        assert len(mgr.list_user_sessions(1)) == 2
+        assert mgr.get_active_session(1).session_id == s2.session_id
+        assert mgr.set_active_session(1, s1.session_id) is True
+        assert mgr.get_active_session(1).session_id == s1.session_id
+        # kill
+        assert mgr.kill_session(s1.session_id) is True
+        assert mgr.get_session(s1.session_id) is None
+        # prune offline (create offline)
+        from agents_on_hand.session_manager import AgentSession
+        s_off = AgentSession(session_id="off", user_id=2, agent_key="bash", agent_name="Bash", command="bash", working_dir=tmp_path)
+        s_off.is_running = False
+        mgr.sessions["off"] = s_off
+        mgr.user_active_session[2] = "off"
+        assert mgr.prune_offline_sessions(2) == 1

@@ -83,12 +83,20 @@ async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE
     active_session = session_manager.get_active_session(user_id)
 
     # If the session is currently starting up (probing chain / initializing), wait briefly
+    # so a prompt sent right after /aoh_new is not dropped. Bounded: ~3.2s max,
+    # then tell the user the session is still starting instead of blocking longer.
     if active_session and getattr(active_session, "is_starting", False):
-        logger.info(f"Session {active_session.session_id} is starting, waiting for readiness...")
-        for _ in range(25):
+        logger.info(f"Session {active_session.session_id} is starting, waiting briefly...")
+        for _ in range(8):
             await asyncio.sleep(0.4)
             if active_session.is_running or not getattr(active_session, "is_starting", False):
                 break
+        if active_session.is_starting and not active_session.is_running:
+            await update.message.reply_text(
+                "⏳ *Session 仍在啟動中*（探測 Driver / 初始化），請稍候幾秒再傳送訊息。",
+                parse_mode="Markdown",
+            )
+            return
 
     if not active_session or not active_session.is_running:
         logger.info(f"Offline check: user={user_id} active_id={session_manager.user_active_session.get(user_id)} has_session={active_session is not None} is_running={getattr(active_session, 'is_running', None)} sessions={list(session_manager.sessions.keys())[-3:]}")

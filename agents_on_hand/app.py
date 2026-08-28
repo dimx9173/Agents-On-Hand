@@ -28,9 +28,10 @@ logger = logging.getLogger("AgentsOnHand")
 
 
 async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Log full details for debugging; never leak exception internals to the user
     logger.error("Exception while handling an update:", exc_info=context.error)
     if isinstance(update, Update):
-        error_msg = f"❌ *系統處理時發生錯誤*:\n`{context.error}`"
+        error_msg = "❌ *系統處理時發生錯誤*，請稍後重試。詳細資訊已記錄於伺服器日誌。"
         try:
             if update.callback_query:
                 await update.callback_query.message.reply_text(error_msg, parse_mode="Markdown")

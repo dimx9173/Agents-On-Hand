@@ -9,7 +9,8 @@ from typing import Any
 
 import pexpect
 
-from ..ansi_cleaner import clean_cli_output
+from ..ansi_cleaner import IncrementalAnsiCleaner, clean_cli_output
+from ..process_utils import kill_process_tree, set_pdeathsig_and_pgrp
 from .base_driver import BaseDriver, DriverEvent
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ class PTYDriver(BaseDriver):
         super().__init__(command, working_dir)
         self.process: pexpect.spawn | None = None
         self._read_task: asyncio.Task | None = None
+        self._ansi_cleaner = IncrementalAnsiCleaner()
 
     async def start(self) -> bool:
         """Spawn the process in a pseudo-terminal."""
@@ -33,6 +35,7 @@ class PTYDriver(BaseDriver):
                 encoding="utf-8",
                 echo=False,
                 dimensions=(30, 120),
+                preexec_fn=set_pdeathsig_and_pgrp,
             )
             self.is_running = True
             loop = asyncio.get_running_loop()
@@ -53,7 +56,8 @@ class PTYDriver(BaseDriver):
                     None, lambda: self._read_nonblocking()
                 )
                 if chunk:
-                    cleaned = clean_cli_output(chunk)
+                    cleaned_chunk = self._ansi_cleaner.feed(chunk)
+                    cleaned = clean_cli_output(cleaned_chunk)
                     if cleaned:
                         self.emit_event(DriverEvent(DriverEvent.TEXT_DELTA, content=cleaned))
                 else:
@@ -63,6 +67,12 @@ class PTYDriver(BaseDriver):
             except Exception as e:
                 logger.error(f"Error in PTYDriver read loop: {e}")
                 await asyncio.sleep(0.1)
+
+        remaining_buf = self._ansi_cleaner.flush()
+        if remaining_buf:
+            cleaned = clean_cli_output(remaining_buf)
+            if cleaned:
+                self.emit_event(DriverEvent(DriverEvent.TEXT_DELTA, content=cleaned))
 
         self.is_running = False
         self.emit_event(DriverEvent(DriverEvent.EXIT, exit_code=0))
@@ -93,10 +103,17 @@ class PTYDriver(BaseDriver):
             self.process.send(res)
 
     def stop(self):
-        """Terminate the PTY process."""
+        """Terminate the PTY process and its process tree."""
         self.is_running = False
+        if self._read_task and not self._read_task.done():
+            self._read_task.cancel()
         if self.process:
+            kill_process_tree(self.process)
             try:
                 self.process.terminate(force=True)
+            except Exception:
+                pass
+            try:
+                self.process.close(force=True)
             except Exception:
                 pass

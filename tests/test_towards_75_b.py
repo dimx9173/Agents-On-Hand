@@ -85,10 +85,10 @@ async def test_session_menu_full():
             assert q.answer.called
 
 def test_acp_session_extract_edge2():
-    from agents_on_hand.acp_session import extract_acp_text_delta
+    from agents_on_hand.drivers.acp_driver import extract_acp_text_delta
     assert extract_acp_text_delta({"content": {"text": "hi"}}) == "hi"
     assert extract_acp_text_delta({"update": {"delta": "d"}}) == "d"
-    assert extract_acp_text_delta({"content": 123}) == "123"
+    assert extract_acp_text_delta({"content": 123}) == ""
     assert extract_acp_text_delta({"content": None}) == ""
     assert extract_acp_text_delta({}) == ""
 

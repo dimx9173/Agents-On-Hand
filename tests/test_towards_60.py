@@ -6,22 +6,23 @@ import pytest
 @pytest.mark.asyncio
 async def test_session_manager_custom_command(tmp_path):
     from agents_on_hand.session_manager import SessionManager
-    mgr = SessionManager(store_path=tmp_path / "state.json")
-    sess = mgr.create_session(user_id=5, agent_key="custom_xyz", working_dir=tmp_path, custom_command="echo hello")
-    assert sess.command == "echo hello"
-    assert sess.agent_name.startswith("Custom")
-    assert mgr.set_active_session(5, sess.session_id) is True
-    assert mgr.set_active_session(5, "nonexistent") is False
-    assert mgr.get_session("nonexistent") is None
-    assert mgr.get_active_session(999) is None
-    assert mgr.list_user_sessions(999) == []
-    assert mgr.kill_session("nonexistent") is False
-    assert mgr.get_session(sess.session_id) is not None
-    # prune with no offline
-    sess.is_running = True
-    assert mgr.prune_offline_sessions(5) == 0
-    sess.is_running = False
-    assert mgr.prune_offline_sessions(5) == 1
+    with patch("agents_on_hand.session_manager.AgentSession.start", new_callable=AsyncMock):
+        mgr = SessionManager(store_path=tmp_path / "state.json")
+        sess = mgr.create_session(user_id=5, agent_key="custom_xyz", working_dir=tmp_path, custom_command="echo hello")
+        assert sess.command == "echo hello"
+        assert sess.agent_name.startswith("Custom")
+        assert mgr.set_active_session(5, sess.session_id) is True
+        assert mgr.set_active_session(5, "nonexistent") is False
+        assert mgr.get_session("nonexistent") is None
+        assert mgr.get_active_session(999) is None
+        assert mgr.list_user_sessions(999) == []
+        assert mgr.kill_session("nonexistent") is False
+        assert mgr.get_session(sess.session_id) is not None
+        # prune with no offline
+        sess.is_running = True
+        assert mgr.prune_offline_sessions(5) == 0
+        sess.is_running = False
+        assert mgr.prune_offline_sessions(5) == 1
 
 def test_session_manager_handle_exit(tmp_path):
     from agents_on_hand.session_manager import SessionManager, AgentSession
@@ -61,7 +62,7 @@ async def test_stream_handler_render_and_split():
     # tool result
     evt3 = DriverEvent(event_type=DriverEvent.TOOL_RESULT, content="output", tool_name="bash")
     streamer._on_driver_event(evt3)
-    assert "Tool" in streamer.current_text or "bash" in streamer.current_text
+    assert any(t["tool_name"] == "bash" for t in streamer.tool_results)
     streamer.stop()
     assert sess.unregister_listener.called
 

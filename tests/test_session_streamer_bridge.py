@@ -3,7 +3,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from agents_on_hand.acp_session import ACPSession
 from agents_on_hand.drivers.base_driver import BaseDriver, DriverEvent
 from agents_on_hand.handlers.chat import text_message_router
 from agents_on_hand.session_manager import DRIVER_MAP, AgentSession, SessionManager
@@ -140,24 +139,6 @@ class TestSessionStreamerBridge(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("已離線", text)
 
         self.assertEqual(driver.sent_prompts, ["hihi"])
-
-    async def test_acp_session_kill_calls_stop_without_error(self):
-        """ACPSession.kill() should cleanly call client.stop() without AttributeError."""
-        session = ACPSession(
-            session_id="test_sess_4",
-            user_id=1004,
-            agent_key="opencode",
-            agent_name="OpenCode CLI",
-            command="opencode acp",
-            working_dir=Path("/tmp/test_cwd"),
-        )
-        mock_client = MagicMock()
-        session.client = mock_client
-        session.is_running = True
-
-        session.kill()
-        self.assertFalse(session.is_running)
-        mock_client.stop.assert_called_once()
 
     async def test_prune_offline_sessions(self):
         """prune_offline_sessions should remove only non-running sessions for the user."""

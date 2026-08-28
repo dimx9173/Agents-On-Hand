@@ -32,28 +32,29 @@ def test_acp_client_error_handling():
 @pytest.mark.asyncio
 async def test_session_manager_create_custom_and_prune(tmp_path):
     from agents_on_hand.session_manager import SessionManager, AgentSession
-    mgr = SessionManager(store_path=tmp_path / "s.json")
-    # custom command
-    s1 = mgr.create_session(user_id=7, agent_key="custom", working_dir=tmp_path, custom_command="ls -la")
-    assert s1.command == "ls -la"
-    # second user
-    s2 = mgr.create_session(user_id=8, agent_key="bash", working_dir=tmp_path)
-    assert len(mgr.list_user_sessions(7)) == 1
-    assert mgr.get_active_session(7).session_id == s1.session_id
-    # switch active
-    assert mgr.set_active_session(7, s1.session_id) is True
-    assert mgr.set_active_session(7, "bad") is False
-    # kill
-    assert mgr.kill_session(s1.session_id) is True
-    assert mgr.get_session(s1.session_id) is None
-    assert mgr.kill_session("bad") is False
-    # prune offline
-    s_off = AgentSession(session_id="off1", user_id=9, agent_key="bash", agent_name="Bash", command="bash", working_dir=tmp_path)
-    s_off.is_running = False
-    mgr.sessions["off1"] = s_off
-    mgr.user_active_session[9] = "off1"
-    assert mgr.prune_offline_sessions(9) == 1
-    assert mgr.prune_offline_sessions(99) == 0
+    with patch("agents_on_hand.session_manager.AgentSession.start", new_callable=AsyncMock):
+        mgr = SessionManager(store_path=tmp_path / "s.json")
+        # custom command
+        s1 = mgr.create_session(user_id=7, agent_key="custom", working_dir=tmp_path, custom_command="ls -la")
+        assert s1.command == "ls -la"
+        # second user
+        s2 = mgr.create_session(user_id=8, agent_key="bash", working_dir=tmp_path)
+        assert len(mgr.list_user_sessions(7)) == 1
+        assert mgr.get_active_session(7).session_id == s1.session_id
+        # switch active
+        assert mgr.set_active_session(7, s1.session_id) is True
+        assert mgr.set_active_session(7, "bad") is False
+        # kill
+        assert mgr.kill_session(s1.session_id) is True
+        assert mgr.get_session(s1.session_id) is None
+        assert mgr.kill_session("bad") is False
+        # prune offline
+        s_off = AgentSession(session_id="off1", user_id=9, agent_key="bash", agent_name="Bash", command="bash", working_dir=tmp_path)
+        s_off.is_running = False
+        mgr.sessions["off1"] = s_off
+        mgr.user_active_session[9] = "off1"
+        assert mgr.prune_offline_sessions(9) == 1
+        assert mgr.prune_offline_sessions(99) == 0
 
 @pytest.mark.asyncio
 async def test_stream_handler_tool_and_throttle():

@@ -149,6 +149,28 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
             return
         with open(session.log_file_path, "rb") as f:
             await context.bot.send_document(chat_id=query.message.chat_id, document=f, filename=f"{session.session_id}_{session.agent_key}.log", caption=f"📥 Log 檔案: {session.agent_name} ({session.session_id})")
+    elif action == "retry":
+        if not session or not session.is_running:
+            await query.message.reply_text("⚠️ 該 Session 已離線或不存在，無法重試。")
+            return
+        last_prompt = getattr(session, "last_user_prompt", "")
+        if not last_prompt:
+            await query.message.reply_text("ℹ️ 目前沒有可重試的上一條 Prompt。")
+            return
+        await query.message.reply_text(f"🔄 <b>重試上一條 Prompt</b>: <code>{last_prompt}</code>", parse_mode="HTML")
+        session.send_input(last_prompt)
+        chat_id = query.message.chat_id
+        if (
+            user_id not in active_streamers
+            or active_streamers[user_id].session.session_id != session.session_id
+            or not active_streamers[user_id]._is_active
+        ):
+            if user_id in active_streamers:
+                active_streamers[user_id].stop()
+            streamer = create_streamer_for_session(context.bot, chat_id, session)
+            streamer.start()
+            active_streamers[user_id] = streamer
+        active_streamers[user_id].notify_user_input()
     elif action == "kill":
         if session_manager.kill_session(session_id):
             if user_id in active_streamers and active_streamers[user_id].session.session_id == session_id:
@@ -157,3 +179,4 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
             await query.edit_message_text(f"🛑 已成功結束 Session: `{session_id}`", parse_mode="Markdown")
         else:
             await query.message.reply_text("❌ 結束 Session 失敗或不存在。")
+

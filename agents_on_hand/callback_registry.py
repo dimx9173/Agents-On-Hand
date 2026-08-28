@@ -36,11 +36,11 @@ def get_path_token(path: Path) -> str:
     return token
 
 
-def resolve_path_token(token_or_str: str) -> Path:
-    """Resolve a short token or raw path string back to Path."""
+def resolve_path_token(token_or_str: str) -> Path | None:
+    """Resolve a short token back to Path. Returns None for unknown/expired tokens (fail closed)."""
     if token_or_str in path_registry:
         return path_registry[token_or_str]
-    return Path(token_or_str).expanduser().resolve()
+    return None
 
 
 # Restart token registry

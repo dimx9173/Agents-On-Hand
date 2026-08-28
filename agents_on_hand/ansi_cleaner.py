@@ -507,8 +507,14 @@ def format_hermes_html(
 
     # 1. Expandable Thinking Block
     if clean_thought.strip():
-        escaped_thought = escape_html(clean_thought.strip())
-        thought_html = f"<blockquote expandable><b>💭 思考過程</b>\n{escaped_thought}</blockquote>"
+        if not is_final and len(clean_thought) > 1500:
+            preview_thought = "...\n" + clean_thought[-1200:].strip()
+            escaped_thought = escape_html(preview_thought)
+            thought_html = f"<blockquote expandable><b>💭 思考中 ({len(clean_thought)} 字)...</b>\n{escaped_thought}</blockquote>"
+        else:
+            escaped_thought = escape_html(clean_thought.strip())
+            header_title = "💭 思考過程" if is_final else "💭 思考中..."
+            thought_html = f"<blockquote expandable><b>{header_title}</b>\n{escaped_thought}</blockquote>"
         sections.append(thought_html)
 
     # 2. Tool Executions & Results (if any)

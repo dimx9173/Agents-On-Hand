@@ -68,7 +68,7 @@ class UnifiedStreamer:
         self.current_thought: str = ""
         self.tool_results: list[dict[str, Any]] = []
         self._tool_count: int = 0
-        self.current_msg_id: int | None = None
+        self.msg_ids: list[int] = []
 
         self._is_active: bool = False
         self._last_edit_time: float = 0.0
@@ -80,6 +80,21 @@ class UnifiedStreamer:
         self._trailing_flush_task: asyncio.Task | None = None
         self._wait_indicator_task: asyncio.Task | None = None
         self._pending_tool_req_ids: set[str] = set()
+
+    @property
+    def current_msg_id(self) -> int | None:
+        """Backward compatibility getter for the primary stream message ID."""
+        return self.msg_ids[0] if self.msg_ids else None
+
+    @current_msg_id.setter
+    def current_msg_id(self, val: int | None):
+        """Backward compatibility setter for the primary stream message ID."""
+        if val is None:
+            self.msg_ids.clear()
+        elif not self.msg_ids:
+            self.msg_ids.append(val)
+        else:
+            self.msg_ids[0] = val
 
     def start(self):
         """Start listening to driver events."""
@@ -101,18 +116,18 @@ class UnifiedStreamer:
         A new prompt starts a new Telegram message: flush the previous turn's
         accumulated text to its own message, then reset streaming state.
         """
-        if self.current_msg_id is not None and (self.current_text or self.current_thought):
+        if self.msg_ids and (self.current_text or self.current_thought):
             self._cancel_trailing_flush()
             asyncio.create_task(
                 self._flush_previous_turn(
-                    self.current_text, self.current_thought, self.current_msg_id
+                    self.current_text, self.current_thought, list(self.msg_ids)
                 )
             )
         self.current_text = ""
         self.current_thought = ""
         self.tool_results = []
         self._tool_count = 0
-        self.current_msg_id = None
+        self.msg_ids.clear()
         self._is_turn_final = False
         self._pending_tool_req_ids.clear()
         self._cancel_wait_indicator()
@@ -122,9 +137,8 @@ class UnifiedStreamer:
         except RuntimeError:
             self._turn_start_time = 0.0
 
-        if self._typing_task is None or self._typing_task.done():
-            self._typing_task = asyncio.create_task(self._typing_loop())
-
+        self._stop_typing()
+        self._typing_task = asyncio.create_task(self._typing_loop())
         self._wait_indicator_task = asyncio.create_task(self._wait_indicator_loop())
 
     async def _wait_indicator_loop(self):
@@ -132,9 +146,11 @@ class UnifiedStreamer:
         try:
             await asyncio.sleep(4.0)
             async with self._lock:
-                if not self.current_text and not self.current_thought and self._is_active:
+                if not self.current_text and not self.current_thought and self._is_active and not self.msg_ids:
                     waiting_msg = "⏳ <b>Agent 正在思考與處理中，請稍候...</b>"
-                    self.current_msg_id = await self._deliver(waiting_msg, self.current_msg_id)
+                    first_id = await self._deliver(waiting_msg, None)
+                    if first_id:
+                        self.msg_ids.append(first_id)
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -147,8 +163,8 @@ class UnifiedStreamer:
         self._wait_indicator_task = None
 
     async def _typing_loop(self):
-        """Periodically send Telegram typing status every 4s while processing."""
-        while self._is_active:
+        """Periodically send Telegram typing status every 4s while turn is active."""
+        while self._is_active and not self._is_turn_final:
             try:
                 await self.bot.send_chat_action(chat_id=self.chat_id, action="typing")
             except Exception as e:
@@ -165,7 +181,6 @@ class UnifiedStreamer:
         self._cancel_wait_indicator()
         if isinstance(event, str):
             self.current_text += event
-            self._stop_typing()
             logger.info(f"Streamer TEXT (raw) +{len(event)} chars → total {len(self.current_text)}")
             asyncio.create_task(self._schedule_edit())
             return
@@ -174,13 +189,11 @@ class UnifiedStreamer:
 
         if e_type == DriverEvent.TEXT_DELTA:
             self.current_text += event.content
-            self._stop_typing()
             logger.info(f"Streamer TEXT_DELTA +{len(event.content)} chars → total {len(self.current_text)} for session {self.session.session_id}")
             asyncio.create_task(self._schedule_edit())
 
         elif e_type == DriverEvent.THOUGHT_DELTA:
             self.current_thought += event.content
-            self._stop_typing()
             logger.info(f"Streamer THOUGHT_DELTA +{len(event.content)} chars → total {len(self.current_thought)}")
             asyncio.create_task(self._schedule_edit())
 
@@ -196,7 +209,6 @@ class UnifiedStreamer:
                 "content": content_str,
                 "preview": preview,
             })
-            self._stop_typing()
             asyncio.create_task(self._schedule_edit())
 
         elif e_type in (DriverEvent.TURN_END, DriverEvent.EXIT):
@@ -368,7 +380,7 @@ class UnifiedStreamer:
 
     _deliver = _deliver_single
 
-    async def _flush_previous_turn(self, text: str, thought: str, msg_id: int):
+    async def _flush_previous_turn(self, text: str, thought: str, msg_ids: list[int]):
         """Best-effort final edit/send of the previous turn's message before reset."""
         try:
             formatted = self._render_content(text, thought, is_final=True)
@@ -377,9 +389,9 @@ class UnifiedStreamer:
             chunks = split_html_into_chunks(formatted, max_chars=3800)
             if not chunks:
                 return
-            await self._deliver_single(chunks[0], msg_id)
-            for extra_chunk in chunks[1:]:
-                await self._deliver_single(extra_chunk, None)
+            for i, chunk in enumerate(chunks):
+                target_id = msg_ids[i] if i < len(msg_ids) else None
+                await self._deliver_single(chunk, target_id)
         except Exception as e:
             logger.debug(f"Error flushing previous turn: {e}")
 
@@ -407,24 +419,19 @@ class UnifiedStreamer:
                 ]
             ])
 
-        # Single chunk message (most common)
-        if len(chunks) == 1:
-            self.current_msg_id = await self._deliver_single(
-                chunks[0], self.current_msg_id, reply_markup=action_markup
-            )
-            return
-
-        # Multi-chunk pagination (text > 3800 chars)
         for i, chunk in enumerate(chunks):
             is_last = (i == len(chunks) - 1)
             chunk_markup = action_markup if (is_last and self._is_turn_final) else None
 
-            if i == 0:
-                self.current_msg_id = await self._deliver_single(
-                    chunk, self.current_msg_id, reply_markup=chunk_markup
-                )
+            if i < len(self.msg_ids):
+                target_id = self.msg_ids[i]
+                delivered_id = await self._deliver_single(chunk, target_id, reply_markup=chunk_markup)
+                if delivered_id and delivered_id != target_id:
+                    self.msg_ids[i] = delivered_id
             else:
-                await self._deliver_single(chunk, None, reply_markup=chunk_markup)
+                new_id = await self._deliver_single(chunk, None, reply_markup=chunk_markup)
+                if new_id:
+                    self.msg_ids.append(new_id)
 
 
 # Compatibility Alias for bot.py and tests

@@ -13,6 +13,34 @@ from ..session_manager import session_manager
 logger = logging.getLogger("AgentsOnHand")
 
 
+def _build_session_row(
+    s: "AgentSession",
+    active_session: "AgentSession | None",
+    user_id: int,
+) -> list[InlineKeyboardButton]:
+    """Build keyboard buttons for a single session row based on its state.
+
+    - Active + running  -> ⏸️ Pause + 📄 Log + 🛑 Delete
+    - Running (bg)      -> ▶️ Switch + 📄 Log + 🔄 Restart + 🛑 Delete
+    - Offline           -> 🔄 Restart + 📄 Log + 🛑 Delete
+    """
+    row: list[InlineKeyboardButton] = []
+    short_id = s.session_id.removeprefix("sess_")
+    is_active = active_session and active_session.session_id == s.session_id
+
+    if is_active and s.is_running:
+        row.append(InlineKeyboardButton("⏸️ 暫停", callback_data=f"sess:pause:{s.session_id}"))
+    elif s.is_running:
+        row.append(InlineKeyboardButton(f"▶️ {short_id}", callback_data=f"sess:switch:{s.session_id}"))
+        row.append(InlineKeyboardButton("🔄 重啟", callback_data=f"sess:restart:{s.session_id}"))
+    else:
+        row.append(InlineKeyboardButton("🔄 重啟", callback_data=f"sess:restart:{s.session_id}"))
+
+    row.append(InlineKeyboardButton("📄 查看 Log", callback_data=f"sess:logs:{s.session_id}"))
+    row.append(InlineKeyboardButton("🛑 刪除", callback_data=f"sess:kill:{s.session_id}"))
+    return row
+
+
 @restricted
 async def sessions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
@@ -32,11 +60,7 @@ async def sessions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         active_badge = " ⭐ (當前 Active)" if is_active else ""
         text += f"{status_icon} *ID*: `{s.session_id}` | *Agent*: {s.agent_name}{active_badge}\n"
         text += f"   📁 `{s.working_dir.name}`\n\n"
-        row = []
-        if not is_active:
-            row.append(InlineKeyboardButton(f"🔄 {s.session_id.removeprefix('sess_')}", callback_data=f"sess:switch:{s.session_id}"))
-        row.append(InlineKeyboardButton("📄 查看 Log", callback_data=f"sess:logs:{s.session_id}"))
-        row.append(InlineKeyboardButton("🛑 刪除", callback_data=f"sess:kill:{s.session_id}"))
+        row = _build_session_row(s, active_session, user_id)
         keyboard.append(row)
     if has_offline:
         keyboard.append([InlineKeyboardButton("🧹 一鍵清理所有離線 Session", callback_data="sess:prune_offline")])
@@ -86,11 +110,7 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
                     active_badge = " ⭐ (當前 Active)" if is_active else ""
                     text += f"{status_icon} *ID*: `{s.session_id}` | *Agent*: {s.agent_name}{active_badge}\n"
                     text += f"   📁 `{s.working_dir.name}`\n\n"
-                    row = []
-                    if not is_active:
-                        row.append(InlineKeyboardButton(f"🔄 {s.session_id.removeprefix('sess_')}", callback_data=f"sess:switch:{s.session_id}"))
-                    row.append(InlineKeyboardButton("📄 查看 Log", callback_data=f"sess:logs:{s.session_id}"))
-                    row.append(InlineKeyboardButton("🛑 刪除", callback_data=f"sess:kill:{s.session_id}"))
+                    row = _build_session_row(s, active_session, user_id)
                     keyboard.append(row)
                 if has_offline:
                     keyboard.append([InlineKeyboardButton("🧹 一鍵清理所有離線 Session", callback_data="sess:prune_offline")])

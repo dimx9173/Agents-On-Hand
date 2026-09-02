@@ -49,6 +49,52 @@ async def test_sessions_command_with_sessions():
         update.message.reply_text.assert_called_once()
         txt = update.message.reply_text.call_args[0][0]
         assert "sess_a" in txt and "sess_b" in txt
+        # regression: button label strips sess_ prefix but callback keeps full id
+        kwargs = update.message.reply_text.call_args[1]
+        markup = kwargs.get("reply_markup")
+        assert markup is not None
+        btns = [b for row in markup.inline_keyboard for b in row]
+        switch_btns = [b for b in btns if b.callback_data and b.callback_data.startswith("sess:switch:")]
+        assert switch_btns and all(b.callback_data.startswith("sess:switch:sess_") for b in switch_btns)
+        assert all(not b.text.strip().startswith("sess_") for b in switch_btns)
+
+
+@pytest.mark.asyncio
+async def test_sessions_command_button_label_strips_sess_prefix():
+    from agents_on_hand.ui.session_menu import sessions_command
+    s = _mock_session("sess_abc12345", "Bash", True, active=False)
+    with patch("agents_on_hand.ui.session_menu.session_manager") as sm:
+        sm.list_user_sessions.return_value = [s]
+        sm.get_active_session.return_value = None
+        update = MagicMock()
+        update.effective_user = MagicMock(id=1)
+        update.message = MagicMock()
+        update.message.reply_text = AsyncMock()
+        with patch("agents_on_hand.security.is_user_allowed", return_value=True):
+            await sessions_command(update, MagicMock())
+        markup = update.message.reply_text.call_args[1]["reply_markup"]
+        btn = [b for row in markup.inline_keyboard for b in row if b.callback_data == "sess:switch:sess_abc12345"][0]
+        assert btn.text == "🔄 abc12345"
+        assert btn.callback_data == "sess:switch:sess_abc12345"
+
+
+@pytest.mark.asyncio
+async def test_acp_perm_with_colon_in_req_id():
+    from agents_on_hand.handlers.acp_permissions import acp_permission_callback_handler
+    mock_session = MagicMock()
+    mock_session.respond_permission = AsyncMock()
+    with patch("agents_on_hand.handlers.acp_permissions.session_manager") as sm:
+        sm.get_session.return_value = mock_session
+        q = MagicMock()
+        q.answer = AsyncMock()
+        q.edit_message_text = AsyncMock()
+        q.data = "acp_perm:approve:sess_abc12345:tool:call:123"
+        q.from_user = MagicMock(id=1)
+        update = MagicMock()
+        update.callback_query = q
+        with patch("agents_on_hand.security.is_user_allowed", return_value=True):
+            await acp_permission_callback_handler(update, MagicMock())
+        mock_session.respond_permission.assert_called_once_with("tool:call:123", approved=True)
 
 @pytest.mark.asyncio
 async def test_prune_command_zero():

@@ -20,7 +20,7 @@ async def acp_permission_callback_handler(update: Update, context: ContextTypes.
     action = parts[1]
     if len(parts) >= 4:
         session_id = parts[2]
-        req_id_str = parts[3]
+        req_id_str = ":".join(parts[3:])
         target_session = session_manager.get_session(session_id)
     else:
         req_id_str = parts[2]

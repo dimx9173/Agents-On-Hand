@@ -87,6 +87,7 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
     parts = data.split(":")
     action = parts[1]
     session_id = parts[2] if len(parts) > 2 else ""
+    logger.info(f"[TG_CB] user={user_id} action={action} session={session_id} data={data}")
 
     if action == "prune_offline":
         pruned_count = session_manager.prune_offline_sessions(user_id)
@@ -126,6 +127,11 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
             await query.message.reply_text("❌ 該 Session 已不存在。")
             return
         prev_session = session_manager.get_active_session(user_id)
+        logger.info(f"[SESSION_SWITCH] user={user_id} from={getattr(prev_session, 'session_id', None)} to={session_id}")
+        try:
+            (prev_session or session).trace.streamer_switch(getattr(prev_session, "session_id", None), session_id, reason="switch")
+        except Exception:
+            pass
         if prev_session and prev_session.session_id != session_id and prev_session.is_running:
             def _make_bg_done_cb(bg_sess_id: str, bg_agent_name: str, target_chat_id: int):
                 def _on_bg_done(s: Any) -> None:

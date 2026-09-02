@@ -92,7 +92,9 @@ async def test_journey_chat_send_and_offline_recovery(tmp_path):
             ctx = MagicMock()
             ctx.bot = MagicMock()
             await text_message_router(update, ctx)
-            mock_sess.send_input.assert_called_once_with("hello agent")
+            assert mock_sess.send_input.called
+            assert mock_sess.send_input.call_args[0][0] == "hello agent"
+            assert "turn_id" in mock_sess.send_input.call_args[1]
         # offline case
         mock_sess_off = _make_mock_session("sess_off", "Bash", False)
         mock_sess_off.is_running = False

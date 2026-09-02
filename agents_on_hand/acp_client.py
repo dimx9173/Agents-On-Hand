@@ -24,6 +24,12 @@ class ACPClient:
         self._permission_listeners = []
         self._read_task: asyncio.Task | None = None
         self.is_running = False
+        self._trace = None  # optional SessionTraceLogger injected by driver
+        self.acp_session_id: str | None = None
+
+    def set_trace(self, trace) -> None:
+        """Attach a SessionTraceLogger for ACP_CALL tracing (optional)."""
+        self._trace = trace
 
     def register_listener(self, callback):
         """Register listener for ACP notifications (updates, content deltas, etc.)."""
@@ -78,6 +84,11 @@ class ACPClient:
         if isinstance(sess_res, dict) and "sessionId" in sess_res:
             self.acp_session_id = sess_res["sessionId"]
             logger.info(f"ACP Session created successfully with sessionId={self.acp_session_id}")
+            if self._trace:
+                try:
+                    self._trace.acp_session_id(self.acp_session_id)
+                except Exception:
+                    pass
         else:
             logger.warning(f"session/new did not return sessionId: {sess_res}")
 
@@ -145,9 +156,13 @@ class ACPClient:
             req_id = data.get("id")
             tool_name = params.get("name") or params.get("title") or "unknown"
             logger.info(
-                f"ACP permission_request received: req_id={req_id} tool='{tool_name}' "
-                f"— waiting for user approval"
+                f"[ACP_PERM] req_id={req_id} tool='{tool_name}' — waiting for user approval"
             )
+            if self._trace:
+                try:
+                    self._trace.perm_request(req_id, tool_name)
+                except Exception:
+                    pass
             for perm_listener in self._permission_listeners:
                 try:
                     perm_listener(req_id, params)
@@ -181,6 +196,13 @@ class ACPClient:
             result = await asyncio.wait_for(fut, timeout=timeout)
             elapsed = time.monotonic() - _t0
             logger.debug(f"ACP call '{method}' (req_id={req_id}) completed in {elapsed:.3f}s")
+            if self._trace:
+                try:
+                    self._trace.acp_call(method, elapsed, True)
+                except Exception:
+                    pass
+            else:
+                logger.info(f"[ACP_CALL] method={method} req_id={req_id} elapsed={elapsed:.3f}s status=OK")
             return result
         except asyncio.TimeoutError:
             elapsed = time.monotonic() - _t0
@@ -188,6 +210,23 @@ class ACPClient:
                 f"ACP call '{method}' (req_id={req_id}) TIMED OUT after {elapsed:.3f}s "
                 f"(timeout={timeout}s)"
             )
+            if self._trace:
+                try:
+                    self._trace.acp_call(method, elapsed, False)
+                except Exception:
+                    pass
+            else:
+                logger.warning(f"[ACP_CALL] method={method} req_id={req_id} elapsed={elapsed:.3f}s status=TIMEOUT")
+            raise
+        except Exception as e:
+            elapsed = time.monotonic() - _t0
+            if self._trace:
+                try:
+                    self._trace.acp_call(method, elapsed, False)
+                except Exception:
+                    pass
+            else:
+                logger.warning(f"[ACP_CALL] method={method} req_id={req_id} elapsed={elapsed:.3f}s status=ERR err={e}")
             raise
 
 

@@ -482,7 +482,10 @@ async def test_text_router_normal_flow():
             with patch("agents_on_hand.handlers.chat.active_streamers", {1: mock_streamer}):
                 with patch("agents_on_hand.handlers.chat.create_streamer_for_session") as mock_create:
                     await text_message_router(update, context)
-                    mock_session.send_input.assert_called_with("hello world")
+                    # send_input now includes turn_id for trace correlation
+                    assert mock_session.send_input.called
+                    assert mock_session.send_input.call_args[0][0] == "hello world"
+                    assert "turn_id" in mock_session.send_input.call_args[1]
 
 
 @pytest.mark.asyncio

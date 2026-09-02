@@ -30,6 +30,15 @@ logger = logging.getLogger("AgentsOnHand")
 async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Log full details for debugging; never leak exception internals to the user
     logger.error("Exception while handling an update:", exc_info=context.error)
+    # Also trace to session if resolvable
+    try:
+        uid = getattr(getattr(update, "effective_user", None), "id", None) if isinstance(update, Update) else None
+        if uid:
+            sess = session_manager.get_active_session(uid)
+            if sess:
+                sess.trace.error(f"global_error: {context.error}")
+    except Exception:
+        pass
     if isinstance(update, Update):
         error_msg = "❌ *系統處理時發生錯誤*，請稍後重試。詳細資訊已記錄於伺服器日誌。"
         try:

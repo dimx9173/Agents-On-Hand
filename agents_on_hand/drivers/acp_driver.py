@@ -62,10 +62,25 @@ class ACPDriver(BaseDriver):
         super().__init__(command, working_dir)
         self.client: ACPClient | None = None
 
+    def set_trace(self, trace) -> None:
+        """Attach SessionTraceLogger for ACP correlation."""
+        self._trace = trace
+        if self.client:
+            try:
+                self.client.set_trace(trace)
+            except Exception:
+                pass
+
     async def start(self) -> bool:
         """Start the ACP subprocess and perform initialize + session/new handshake."""
         try:
             self.client = ACPClient(self.command, str(self.working_dir))
+            # Inject trace if available via driver._trace (set by session)
+            if hasattr(self, "_trace") and self._trace:
+                try:
+                    self.client.set_trace(self._trace)
+                except Exception:
+                    pass
             self.client.register_listener(self._on_acp_update)
             self.client.register_permission_listener(self._on_acp_permission_request)
 

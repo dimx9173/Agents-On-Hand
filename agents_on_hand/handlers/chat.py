@@ -40,22 +40,36 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 @restricted
 async def esc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
+    logger.info(f"[TG_CTRL] user={user_id} action=ESC")
     active_session = session_manager.get_active_session(user_id)
     if not active_session or not active_session.is_running:
+        logger.warning(f"[TG_CTRL] user={user_id} action=ESC failed — no active session")
         await update.message.reply_text("⚠️ 目前沒有作用中的 Active Session。")
         return
+    try:
+        active_session.trace.event("USER_INPUT", f"control=ESC user={user_id}")
+    except Exception:
+        pass
     active_session.send_control_char("\x1b")
+    logger.info(f"[TG->AGENT] user={user_id} session={active_session.session_id} control=ESC delivered")
     await update.message.reply_text(f"⏸️ 已傳送 *ESC* 中斷訊號至 `{active_session.agent_name}` (`{active_session.session_id}`)", parse_mode="Markdown")
 
 
 @restricted
 async def ctrlc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
+    logger.info(f"[TG_CTRL] user={user_id} action=CtrlC")
     active_session = session_manager.get_active_session(user_id)
     if not active_session or not active_session.is_running:
+        logger.warning(f"[TG_CTRL] user={user_id} action=CtrlC failed — no active session")
         await update.message.reply_text("⚠️ 目前沒有作用中的 Active Session。")
         return
+    try:
+        active_session.trace.event("USER_INPUT", f"control=CtrlC user={user_id}")
+    except Exception:
+        pass
     active_session.send_control_char("\x03")
+    logger.info(f"[TG->AGENT] user={user_id} session={active_session.session_id} control=CtrlC delivered")
     await update.message.reply_text(f"🛑 已傳送 *Ctrl+C* 中斷訊號至 `{active_session.agent_name}` (`{active_session.session_id}`)", parse_mode="Markdown")
 
 
@@ -78,15 +92,29 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 @restricted
 async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    import time as _time
+    import uuid as _uuid
+    _route_start = _time.monotonic()
+    _turn_id = _uuid.uuid4().hex[:8]
     user_id = update.effective_user.id
-    user_text = update.message.text
+    # Telegram may send None for non-text updates (photos, etc.); guard gracefully
+    user_text = getattr(update.message, "text", None) or ""
+    chat_id = getattr(update.message, "chat_id", None) or getattr(update.effective_chat, "id", None)
+    logger.info(
+        f"[TG_IN] turn_id={_turn_id} user={user_id} chat={chat_id} "
+        f"text_len={len(user_text)} text='{user_text[:120]}' has_active={session_manager.get_active_session(user_id) is not None}"
+    )
     active_session = session_manager.get_active_session(user_id)
 
     # If the session is currently starting up (probing chain / initializing), wait briefly
     # so a prompt sent right after /aoh_new is not dropped. Bounded: ~3.2s max,
     # then tell the user the session is still starting instead of blocking longer.
     if active_session and getattr(active_session, "is_starting", False):
-        logger.info(f"Session {active_session.session_id} is starting, waiting briefly...")
+        logger.info(f"[WAIT] turn_id={_turn_id} session={active_session.session_id} is starting, waiting briefly...")
+        try:
+            active_session.trace.event("TURN_START", f"turn_id={_turn_id} state=waiting_for_start text_len={len(user_text)}")
+        except Exception:
+            pass
         for _ in range(8):
             await asyncio.sleep(0.4)
             if active_session.is_running or not getattr(active_session, "is_starting", False):
@@ -99,7 +127,15 @@ async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
 
     if not active_session or not active_session.is_running:
-        logger.info(f"Offline check: user={user_id} active_id={session_manager.user_active_session.get(user_id)} has_session={active_session is not None} is_running={getattr(active_session, 'is_running', None)} sessions={list(session_manager.sessions.keys())[-3:]}")
+        logger.warning(
+            f"[OFFLINE] turn_id={_turn_id} user={user_id} active_id={session_manager.user_active_session.get(user_id)} "
+            f"has_session={active_session is not None} is_running={getattr(active_session, 'is_running', None)} sessions={list(session_manager.sessions.keys())[-3:]}"
+        )
+        if active_session:
+            try:
+                active_session.trace.error(f"turn_id={_turn_id} TG message dropped — session offline", turn_id=_turn_id)
+            except Exception:
+                pass
         reply_markup = None
         if active_session:
             rst_token = register_restart_info(active_session.agent_key, active_session.working_dir)
@@ -115,8 +151,11 @@ async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE
         active_session.send_control_char("\x03")
         await update.message.reply_text(f"🛑 已發送 *Ctrl+C* 至 `{active_session.agent_name}`", parse_mode="Markdown")
         return
-    logger.info(f"Routing text message from user {user_id} to session {active_session.session_id}: '{user_text}'")
-    active_session.send_input(user_text)
+    logger.info(
+        f"[TG->AGENT] turn_id={_turn_id} user={user_id} session={active_session.session_id} "
+        f"driver={active_session.active_driver_name} text_len={len(user_text)} elapsed={(_time.monotonic()-_route_start):.3f}s"
+    )
+    active_session.send_input(user_text, turn_id=_turn_id)
     if (
         user_id not in active_streamers
         or active_streamers[user_id].session.session_id != active_session.session_id
@@ -128,3 +167,4 @@ async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE
         streamer.start()
         active_streamers[user_id] = streamer
     active_streamers[user_id].notify_user_input()
+    logger.info(f"[TG_ROUTE_DONE] turn_id={_turn_id} user={user_id} session={active_session.session_id} active_streamers={len(active_streamers)}")

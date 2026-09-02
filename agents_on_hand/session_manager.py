@@ -103,13 +103,21 @@ class AgentSession:
                 f"Starting session {self.session_id} ({self.agent_name}): command='{self.command}', probing drivers={preferred_drivers}"
             )
 
-            for driver_name in preferred_drivers:
+            total = len(preferred_drivers) + 1  # +1 for PTY fallback
+            for idx, driver_name in enumerate(preferred_drivers, 1):
                 driver_cls = DRIVER_MAP.get(driver_name)
                 if not driver_cls:
                     continue
 
                 logger.info(f"Probing driver '{driver_name}' for session {self.session_id}...")
+                self.trace.driver_probe(driver_name, idx, total)
                 candidate_driver = driver_cls(self.command, self.working_dir)
+                # Wire trace for ACP observability
+                if hasattr(candidate_driver, "set_trace"):
+                    try:
+                        candidate_driver.set_trace(self.trace)
+                    except Exception:
+                        pass
                 candidate_driver.register_listener(self._on_driver_event)
 
                 success = await candidate_driver.start()
@@ -122,15 +130,24 @@ class AgentSession:
                     logger.info(
                         f"Session {self.session_id} successfully bound to Driver '{driver_name}'"
                     )
+                    self.trace.driver_bound(driver_name, True)
+                    self.trace.event("SESSION_INIT", f"agent={self.agent_name} command={self.command} cwd={self.working_dir} driver={driver_name}")
                     return True
 
                 logger.warning(
                     f"Driver '{driver_name}' probing failed for session {self.session_id}. Trying next driver..."
                 )
+                self.trace.driver_bound(driver_name, False)
 
             # Final fallback to PTY Driver
             logger.warning(f"All probing drivers failed for session {self.session_id}. Falling back to PTY...")
+            self.trace.driver_probe("pty", total, total)
             pty = PTYDriver(self.command, self.working_dir)
+            if hasattr(pty, "set_trace"):
+                try:
+                    pty.set_trace(self.trace)
+                except Exception:
+                    pass
             pty.register_listener(self._on_driver_event)
             if await pty.start():
                 self.driver = pty
@@ -138,7 +155,9 @@ class AgentSession:
                 self.is_running = True
                 for cb in list(self._listeners):
                     self._attach_listener_to_driver(cb)
+                self.trace.driver_bound("pty", True)
                 return True
+            self.trace.driver_bound("pty", False)
 
             self.is_running = False
             return False
@@ -162,17 +181,21 @@ class AgentSession:
                 f.write(event.content)
 
         elif event.event_type == DriverEvent.THOUGHT_DELTA and event.content:
-            self.trace.event("THOUGHT_DELTA", f"{len(event.content)} chars")
+            self.trace.thought_delta(len(event.content))
 
         elif event.event_type == DriverEvent.TOOL_REQUEST:
-            self.trace.tool_request(event.request_id, getattr(event, "tool_name", "unknown"))
+            self.trace.tool_request(event.request_id, getattr(event, "tool_name", "unknown"), str(getattr(event, "tool_args", "")))
+            self.trace.perm_request(event.request_id, getattr(event, "tool_name", "unknown"))
+
+        elif event.event_type == DriverEvent.TOOL_RESULT:
+            self.trace.tool_result(event.request_id, getattr(event, "tool_name", "unknown"), str(event.content)[:200])
 
         elif event.event_type in (DriverEvent.TURN_END, DriverEvent.EXIT):
             # Record response completion timing
             if self._response_start_time is not None:
                 elapsed = time.monotonic() - self._response_start_time
                 self.trace.agent_response_done(self.agent_name, self._response_chars, elapsed)
-            self.trace.event("TURN_END", f"driver={self.active_driver_name} type={event.event_type}")
+            self.trace.turn_end(driver=self.active_driver_name, reason=event.event_type)
 
             if event.event_type == DriverEvent.EXIT:
                 self.is_running = False
@@ -194,11 +217,11 @@ class AgentSession:
 
 
 
-    def send_input(self, text: str):
+    def send_input(self, text: str, turn_id: str | None = None):
         """Send prompt to active driver."""
         if self.driver and self.is_running:
             self.last_user_prompt = text
-            self.trace.user_input(text)
+            self.trace.user_input(text, turn_id=turn_id)
             # Record user prompt in log file for complete conversation history
             try:
                 with open(self.log_file_path, "a", encoding="utf-8") as f:

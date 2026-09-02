@@ -99,16 +99,29 @@ class UnifiedStreamer:
     def start(self):
         """Start listening to driver events."""
         self._is_active = True
+        try:
+            self.session.trace.streamer_start(self.__class__.__name__)
+        except Exception:
+            pass
+        logger.info(f"[STREAMER_START] session={getattr(self.session, 'session_id', '?')} chat={self.chat_id}")
         self.session.register_listener(self._on_driver_event)
 
     def stop(self):
         """Stop streamer and typing indicator."""
         self._is_active = False
+        try:
+            self.session.trace.streamer_stop(self.__class__.__name__)
+        except Exception:
+            pass
+        logger.info(f"[STREAMER_STOP] session={getattr(self.session, 'session_id', '?')} chat={self.chat_id} final_text={len(self.current_text)} thought={len(self.current_thought)}")
         self._stop_typing()
         self._cancel_trailing_flush()
         self._cancel_wait_indicator()
         self._pending_tool_req_ids.clear()
-        self.session.unregister_listener(self._on_driver_event)
+        try:
+            self.session.unregister_listener(self._on_driver_event)
+        except Exception:
+            pass
 
     def notify_user_input(self):
         """Trigger top typing indicator when user sends a prompt.
@@ -181,7 +194,7 @@ class UnifiedStreamer:
         self._cancel_wait_indicator()
         if isinstance(event, str):
             self.current_text += event
-            logger.info(f"Streamer TEXT (raw) +{len(event)} chars → total {len(self.current_text)}")
+            logger.info(f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=TEXT_RAW +{len(event)} chars total={len(self.current_text)}")
             asyncio.create_task(self._schedule_edit())
             return
 
@@ -189,15 +202,16 @@ class UnifiedStreamer:
 
         if e_type == DriverEvent.TEXT_DELTA:
             self.current_text += event.content
-            logger.info(f"Streamer TEXT_DELTA +{len(event.content)} chars → total {len(self.current_text)} for session {self.session.session_id}")
+            logger.debug(f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=TEXT_DELTA +{len(event.content)} chars total={len(self.current_text)}")
             asyncio.create_task(self._schedule_edit())
 
         elif e_type == DriverEvent.THOUGHT_DELTA:
             self.current_thought += event.content
-            logger.info(f"Streamer THOUGHT_DELTA +{len(event.content)} chars → total {len(self.current_thought)}")
+            logger.debug(f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=THOUGHT_DELTA +{len(event.content)} chars total={len(self.current_thought)}")
             asyncio.create_task(self._schedule_edit())
 
         elif e_type == DriverEvent.TOOL_REQUEST:
+            logger.info(f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=TOOL_REQUEST req_id={event.request_id} tool={event.tool_name}")
             self._on_tool_request(event.request_id, event.tool_name, event.tool_args)
 
         elif e_type == DriverEvent.TOOL_RESULT:
@@ -209,9 +223,11 @@ class UnifiedStreamer:
                 "content": content_str,
                 "preview": preview,
             })
+            logger.info(f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=TOOL_RESULT tool={event.tool_name} chars={len(content_str)}")
             asyncio.create_task(self._schedule_edit())
 
         elif e_type in (DriverEvent.TURN_END, DriverEvent.EXIT):
+            logger.info(f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type={e_type} is_final=True text={len(self.current_text)} thought={len(self.current_thought)} tools={self._tool_count}")
             self._is_turn_final = True
             self._stop_typing()
             asyncio.create_task(self._schedule_edit())
@@ -315,7 +331,9 @@ class UnifiedStreamer:
 
         Returns the message_id of the streaming message, or None on failure.
         """
-        logger.info(f"Streamer _deliver: msg_id={msg_id} chars={len(formatted)} to chat {self.chat_id}")
+        is_edit = msg_id is not None
+        action = "edit" if is_edit else "send"
+        logger.info(f"[TG_DELIVER] chat={self.chat_id} action={action} msg_id={msg_id} chars={len(formatted)} is_final={self._is_turn_final}")
         kwargs: dict[str, Any] = {"parse_mode": "HTML"}
         if reply_markup is not None:
             kwargs["reply_markup"] = reply_markup
@@ -327,10 +345,14 @@ class UnifiedStreamer:
                     text=formatted,
                     **kwargs,
                 )
-                logger.info(f"Streamer _deliver: sent new msg_id={msg.message_id}")
+                logger.info(f"[TG_DELIVER_OK] chat={self.chat_id} action=send new_msg_id={msg.message_id} chars={len(formatted)}")
+                try:
+                    self.session.trace.tg_deliver(msg.message_id, len(formatted), is_edit=False, is_final=self._is_turn_final)
+                except Exception:
+                    pass
                 return msg.message_id
             except BadRequest as e:
-                logger.info(f"Streamer _deliver: HTML parse failed, retry plain: {e}")
+                logger.warning(f"[TG_DELIVER_HTML_FAIL] chat={self.chat_id} action=send err={e} retry_plain=True")
                 plain_text = _strip_html_tags(formatted)
                 try:
                     plain_kwargs = {"reply_markup": reply_markup} if reply_markup else {}
@@ -353,12 +375,16 @@ class UnifiedStreamer:
                 text=formatted,
                 **kwargs,
             )
+            try:
+                self.session.trace.tg_deliver(msg_id, len(formatted), is_edit=True, is_final=self._is_turn_final)
+            except Exception:
+                pass
             return msg_id
         except BadRequest as e:
             err_str = str(e).lower()
             if "not modified" in err_str:
                 return msg_id
-            logger.info(f"Streamer _deliver: HTML edit failed, retry plain: {e}")
+            logger.warning(f"[TG_DELIVER_HTML_FAIL] chat={self.chat_id} msg_id={msg_id} err={e} retry_plain=True")
             plain_text = _strip_html_tags(formatted)
             try:
                 plain_kwargs = {"reply_markup": reply_markup} if reply_markup else {}

@@ -34,7 +34,7 @@ async def sessions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         text += f"   📁 `{s.working_dir.name}`\n\n"
         row = []
         if not is_active:
-            row.append(InlineKeyboardButton(f"▶️ 切換至 {s.session_id}", callback_data=f"sess:switch:{s.session_id}"))
+            row.append(InlineKeyboardButton(f"🔄 {s.session_id}", callback_data=f"sess:switch:{s.session_id}"))
         row.append(InlineKeyboardButton("📄 查看 Log", callback_data=f"sess:logs:{s.session_id}"))
         row.append(InlineKeyboardButton("🛑 刪除", callback_data=f"sess:kill:{s.session_id}"))
         keyboard.append(row)
@@ -88,7 +88,7 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
                     text += f"   📁 `{s.working_dir.name}`\n\n"
                     row = []
                     if not is_active:
-                        row.append(InlineKeyboardButton(f"▶️ 切換至 {s.session_id}", callback_data=f"sess:switch:{s.session_id}"))
+                        row.append(InlineKeyboardButton(f"🔄 {s.session_id}", callback_data=f"sess:switch:{s.session_id}"))
                     row.append(InlineKeyboardButton("📄 查看 Log", callback_data=f"sess:logs:{s.session_id}"))
                     row.append(InlineKeyboardButton("🛑 刪除", callback_data=f"sess:kill:{s.session_id}"))
                     keyboard.append(row)

@@ -3,10 +3,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agents_on_hand.app import global_error_handler, main, post_init
-from agents_on_hand.callback_registry import get_path_token, path_registry, path_to_token, register_restart_info, restart_registry
-from agents_on_hand.security import restricted
 from agents_on_hand import config as cfg
+from agents_on_hand.app import global_error_handler, main, post_init
+from agents_on_hand.callback_registry import (
+    get_path_token,
+    path_registry,
+    path_to_token,
+    register_restart_info,
+    restart_registry,
+)
+from agents_on_hand.security import restricted
 
 
 @pytest.mark.asyncio
@@ -74,14 +80,21 @@ async def test_post_init_no_users_skips_greeting():
 def test_main_missing_token(capsys):
     import agents_on_hand.app as app_mod
 
-    with patch.object(app_mod, "TELEGRAM_BOT_TOKEN", ""), patch.object(cfg, "TELEGRAM_BOT_TOKEN", ""):
+    with (
+        patch.object(app_mod, "TELEGRAM_BOT_TOKEN", ""),
+        patch.object(cfg, "TELEGRAM_BOT_TOKEN", ""),
+    ):
         main()
     out = capsys.readouterr().out
     assert "TELEGRAM_BOT_TOKEN" in out
 
 
 def test_main_missing_whitelist(capsys):
-    with patch.object(cfg, "TELEGRAM_BOT_TOKEN", "123:abc"), patch.object(cfg, "ALLOWED_TELEGRAM_USER_IDS", set()), patch.object(cfg, "DEV_ALLOW_ALL", False):
+    with (
+        patch.object(cfg, "TELEGRAM_BOT_TOKEN", "123:abc"),
+        patch.object(cfg, "ALLOWED_TELEGRAM_USER_IDS", set()),
+        patch.object(cfg, "DEV_ALLOW_ALL", False),
+    ):
         main()
     out = capsys.readouterr().out
     assert "ALLOWED_TELEGRAM_USER_IDS" in out
@@ -148,7 +161,10 @@ async def test_directory_browser_renders():
     mock_update.message = MagicMock()
     mock_update.message.reply_text = AsyncMock()
     mock_context = MagicMock()
-    with patch("agents_on_hand.ui.directory_browser.is_path_allowed", return_value=True), patch("agents_on_hand.ui.directory_browser.get_path_token", return_value="p_0"):
+    with (
+        patch("agents_on_hand.ui.directory_browser.is_path_allowed", return_value=True),
+        patch("agents_on_hand.ui.directory_browser.get_path_token", return_value="p_0"),
+    ):
         await send_directory_browser(mock_update, mock_context, tmp)
     mock_update.message.reply_text.assert_called_once()
 

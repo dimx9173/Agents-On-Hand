@@ -41,33 +41,82 @@ ALLOWED_ROOT_DIRS: list[Path] = [
     Path(p.strip()).expanduser().resolve() for p in _raw_root_dirs.split(",") if p.strip()
 ]
 
-SESSION_LOG_DIR: Path = Path(os.getenv("SESSION_LOG_DIR", "~/.agents-on-hand/sessions")).expanduser().resolve()
-SESSION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+SESSION_LOG_DIR: Path = (
+    Path(os.getenv("SESSION_LOG_DIR", "~/.agents-on-hand/sessions")).expanduser().resolve()
+)
 
-SESSION_STATE_FILE: Path = Path(os.getenv("SESSION_STATE_FILE", str(SESSION_LOG_DIR.parent / "state.json"))).expanduser().resolve()
-SESSION_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-extra_paths = [
-    Path("~/.bun/bin").expanduser(),
-    Path("~/.local/bin").expanduser(),
-    Path("~/.nvm/versions/node/v24.14.0/bin").expanduser(),
-    Path("/usr/local/bin"),
-    Path("/opt/homebrew/bin"),
-]
-current_path_dirs = os.getenv("PATH", "").split(os.pathsep)
-for ep in extra_paths:
-    if ep.exists() and str(ep) not in current_path_dirs:
-        current_path_dirs.insert(0, str(ep))
-os.environ["PATH"] = os.pathsep.join(current_path_dirs)
+SESSION_STATE_FILE: Path = (
+    Path(os.getenv("SESSION_STATE_FILE", str(SESSION_LOG_DIR.parent / "state.json")))
+    .expanduser()
+    .resolve()
+)
 
 
-AVAILABLE_CLI_AGENTS = {
-    "claude": {"name": "Claude Code", "command": "claude", "drivers": ["claude_stream", "pty"], "use_acp": False},
+def ensure_runtime_dirs() -> None:
+    """Create SESSION_LOG_DIR / state parent on startup (idempotent).
+
+    Kept out of module top-level so importing config never touches the
+    filesystem — call once from the app entry point before sessions start.
+    """
+    SESSION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    SESSION_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+
+# Extra lookup dirs for agent CLIs installed outside PATH (bun, local bin, brew…).
+# Applied lazily via ensure_extra_paths() so that importing this module has no
+# global side effects (previously this rewrote os.environ["PATH"] at import time).
+_EXTRA_PATHS = (
+    "~/.bun/bin",
+    "~/.local/bin",
+    "/usr/local/bin",
+    "/opt/homebrew/bin",
+    "~/.nvm/versions/node/v24.14.0/bin",  # legacy dev-machine path, kept last
+)
+
+_extra_paths_applied = False
+
+
+def ensure_extra_paths() -> None:
+    """Prepend existing extra lookup dirs to os.environ["PATH"] (idempotent)."""
+    global _extra_paths_applied
+    if _extra_paths_applied:
+        return
+    current_path_dirs = os.getenv("PATH", "").split(os.pathsep)
+    for raw in _EXTRA_PATHS:
+        ep = Path(raw).expanduser()
+        if ep.exists() and str(ep) not in current_path_dirs:
+            current_path_dirs.insert(0, str(ep))
+    os.environ["PATH"] = os.pathsep.join(current_path_dirs)
+    _extra_paths_applied = True
+
+
+AVAILABLE_CLI_AGENTS: dict[str, dict] = {
+    "claude": {
+        "name": "Claude Code",
+        "command": "claude",
+        "drivers": ["claude_stream", "pty"],
+        "use_acp": False,
+    },
     "codex": {"name": "Codex CLI", "command": "codex", "drivers": ["pty"], "use_acp": False},
     "pi": {"name": "Pi Agent", "command": "pi", "drivers": ["pi_rpc", "pty"], "use_acp": False},
-    "omp": {"name": "OMP (Oh My Pi)", "command": "omp acp", "drivers": ["acp", "pty"], "use_acp": True},
-    "opencode": {"name": "OpenCode CLI", "command": "opencode acp", "drivers": ["acp", "pty"], "use_acp": True},
-    "prime": {"name": "Prime Agent", "command": "prime-agent --mode acp", "drivers": ["acp", "pi_rpc", "pty"], "use_acp": True},
+    "omp": {
+        "name": "OMP (Oh My Pi)",
+        "command": "omp acp",
+        "drivers": ["acp", "pty"],
+        "use_acp": True,
+    },
+    "opencode": {
+        "name": "OpenCode CLI",
+        "command": "opencode acp",
+        "drivers": ["acp", "pty"],
+        "use_acp": True,
+    },
+    "prime": {
+        "name": "Prime Agent",
+        "command": "prime-agent --mode acp",
+        "drivers": ["acp", "pi_rpc", "pty"],
+        "use_acp": True,
+    },
     "bash": {"name": "Bash Shell", "command": "bash", "drivers": ["pty"], "use_acp": False},
 }
 
@@ -81,6 +130,7 @@ def get_installed_cli_agents(*, use_cache: bool = True) -> dict:
     global _installed_cache, _installed_cache_ts
     import time as _time
 
+    ensure_extra_paths()
     now = _time.monotonic()
     if use_cache and _installed_cache is not None and (now - _installed_cache_ts) < _INSTALLED_TTL:
         return _installed_cache

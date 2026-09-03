@@ -8,7 +8,6 @@ from .process_utils import kill_process_tree, set_pdeathsig_and_pgrp
 logger = logging.getLogger(__name__)
 
 
-
 class ACPClient:
     """
     Async JSON-RPC 2.0 Client over stdio subprocess for ACP (Agent Client Protocol).
@@ -169,7 +168,6 @@ class ACPClient:
                 except Exception as e:
                     logger.error(f"Error in ACP permission listener: {e}")
 
-
     async def call_method(self, method: str, params: dict, timeout: float = 30.0) -> dict:
         """Call a JSON-RPC method on the ACP server and return result."""
         if not self.process or not self.process.stdin:
@@ -202,7 +200,9 @@ class ACPClient:
                 except Exception:
                     pass
             else:
-                logger.info(f"[ACP_CALL] method={method} req_id={req_id} elapsed={elapsed:.3f}s status=OK")
+                logger.info(
+                    f"[ACP_CALL] method={method} req_id={req_id} elapsed={elapsed:.3f}s status=OK"
+                )
             return result
         except asyncio.TimeoutError:
             elapsed = time.monotonic() - _t0
@@ -216,7 +216,9 @@ class ACPClient:
                 except Exception:
                     pass
             else:
-                logger.warning(f"[ACP_CALL] method={method} req_id={req_id} elapsed={elapsed:.3f}s status=TIMEOUT")
+                logger.warning(
+                    f"[ACP_CALL] method={method} req_id={req_id} elapsed={elapsed:.3f}s status=TIMEOUT"
+                )
             raise
         except Exception as e:
             elapsed = time.monotonic() - _t0
@@ -226,9 +228,10 @@ class ACPClient:
                 except Exception:
                     pass
             else:
-                logger.warning(f"[ACP_CALL] method={method} req_id={req_id} elapsed={elapsed:.3f}s status=ERR err={e}")
+                logger.warning(
+                    f"[ACP_CALL] method={method} req_id={req_id} elapsed={elapsed:.3f}s status=ERR err={e}"
+                )
             raise
-
 
     async def send_notification(self, method: str, params: dict):
         """Send a JSON-RPC notification (no response expected)."""
@@ -260,9 +263,7 @@ class ACPClient:
 
     async def prompt(self, prompt_text: str):
         """Send a user prompt to the ACP Agent session."""
-        params = {
-            "prompt": [{"type": "text", "text": prompt_text}]
-        }
+        params: dict = {"prompt": [{"type": "text", "text": prompt_text}]}
         if hasattr(self, "acp_session_id") and self.acp_session_id:
             params["sessionId"] = self.acp_session_id
 
@@ -271,7 +272,6 @@ class ACPClient:
             params,
             timeout=600.0,  # agentic turns spawn subagents and can take minutes; 120s killed a legit 140s run
         )
-
 
     async def cancel(self):
         """Cancel current session execution."""
@@ -284,4 +284,3 @@ class ACPClient:
             self._read_task.cancel()
         if self.process:
             kill_process_tree(self.process)
-

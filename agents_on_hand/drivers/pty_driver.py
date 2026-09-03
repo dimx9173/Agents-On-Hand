@@ -52,9 +52,7 @@ class PTYDriver(BaseDriver):
         loop = asyncio.get_running_loop()
         while self.is_running and self.process and self.process.isalive():
             try:
-                chunk = await loop.run_in_executor(
-                    None, lambda: self._read_nonblocking()
-                )
+                chunk = await loop.run_in_executor(None, lambda: self._read_nonblocking())
                 if chunk:
                     cleaned_chunk = self._ansi_cleaner.feed(chunk)
                     cleaned = clean_cli_output(cleaned_chunk)

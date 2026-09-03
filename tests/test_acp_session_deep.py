@@ -1,10 +1,12 @@
 """Deep ACP session — hit remaining branches towards 75%."""
-import pytest
+
 from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock
+
 
 def test_extract_delta_all_cases():
     from agents_on_hand.drivers.acp_driver import extract_acp_text_delta
+
     assert extract_acp_text_delta({"content": "hi"}) == "hi"
     assert extract_acp_text_delta({"content": {"text": "t"}}) == "t"
     assert extract_acp_text_delta({"content": {"delta": "d"}}) == "d"
@@ -19,16 +21,18 @@ def test_extract_delta_all_cases():
     assert extract_acp_text_delta(None) == ""
     assert extract_acp_text_delta("str") == ""
 
+
 def test_claude_driver_handle_line():
     from agents_on_hand.drivers.claude_stream_driver import ClaudeStreamDriver
+
     d = ClaudeStreamDriver("claude", Path("/tmp"))
     assert "stream-json" in d.command
     # try handle various lines
     for line in [
         '{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}',
         '{"type":"result","result":"ok"}',
-        'not json line',
-        '{}',
+        "not json line",
+        "{}",
     ]:
         try:
             if hasattr(d, "_handle_line"):
@@ -41,8 +45,10 @@ def test_claude_driver_handle_line():
             pass
     assert True
 
+
 def test_pi_rpc_driver_basic(tmp_path):
     from agents_on_hand.drivers.pi_rpc_driver import PiRPCDriver
+
     d = PiRPCDriver("pi", tmp_path)
     assert "pi" in d.command
     cb = MagicMock()
@@ -53,8 +59,10 @@ def test_pi_rpc_driver_basic(tmp_path):
     d.unregister_listener(cb)
     d.stop()
 
+
 def test_pty_driver_pty_flow(tmp_path):
     from agents_on_hand.drivers.pty_driver import PTYDriver
+
     d = PTYDriver("bash", tmp_path)
     cb = MagicMock()
     d.register_listener(cb)

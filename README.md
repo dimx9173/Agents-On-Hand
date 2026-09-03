@@ -5,8 +5,8 @@
 <p align="center">
   <a href="https://github.com/dimx9173/Agents-On-Hand/actions/workflows/test.yml"><img src="https://github.com/dimx9173/Agents-On-Hand/actions/workflows/test.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg" alt="Python">
-  <img src="https://img.shields.io/badge/coverage-86%25-brightgreen.svg" alt="Coverage">
-  <img src="https://img.shields.io/badge/tests-190%2B-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/coverage-85%25-brightgreen.svg" alt="Coverage">
+  <img src="https://img.shields.io/badge/tests-218-brightgreen.svg" alt="Tests">
   <img src="https://img.shields.io/badge/code%20style-ruff-000000.svg" alt="Ruff">
   <img src="https://img.shields.io/badge/mypy-checked-blue.svg" alt="Mypy">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-green.svg" alt="License"></a>

@@ -20,7 +20,9 @@ def _extract_text_from_node(node: Any) -> str:
     if isinstance(node, str):
         # Ignore raw internal JSON hook lines (e.g. OpenCode PostToolUse/transcript dumps)
         stripped = node.strip()
-        if stripped.startswith('{"session_id":') and ("hook_event_name" in stripped or "transcript_path" in stripped):
+        if stripped.startswith('{"session_id":') and (
+            "hook_event_name" in stripped or "transcript_path" in stripped
+        ):
             return ""
         return node
     elif isinstance(node, dict):
@@ -95,7 +97,6 @@ class ACPDriver(BaseDriver):
                 self.client.stop()
             return False
 
-
     async def _monitor_exit(self):
         """Monitor client read loop and emit EXIT event when ACP process terminates."""
         if self.client and self.client._read_task:
@@ -120,12 +121,16 @@ class ACPDriver(BaseDriver):
             return
 
         # Handle tool result / post tool use events
-        if any(kw in update_str for kw in ("toolresult", "tool_result", "posttooluse", "tooloutput")):
+        if any(
+            kw in update_str for kw in ("toolresult", "tool_result", "posttooluse", "tooloutput")
+        ):
             tool_name = up.get("tool_name") or up.get("name") or up.get("title") or "Tool"
             raw_content = up.get("content") or up.get("output") or up.get("result") or ""
             text = _extract_text_from_node(raw_content)
             if text:
-                self.emit_event(DriverEvent(DriverEvent.TOOL_RESULT, tool_name=tool_name, content=text))
+                self.emit_event(
+                    DriverEvent(DriverEvent.TOOL_RESULT, tool_name=tool_name, content=text)
+                )
             return
 
         text_delta = extract_acp_text_delta(params)
@@ -151,6 +156,7 @@ class ACPDriver(BaseDriver):
     def send_prompt(self, text: str):
         """Send prompt to ACP Agent."""
         if self.client and self.is_running:
+
             async def _do_prompt():
                 try:
                     await self.client.prompt(text)

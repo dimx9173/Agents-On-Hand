@@ -1,17 +1,30 @@
 """Towards 75% — claude_stream + pi_rpc + chat/session_menu remaining."""
+
 from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
+
 
 def test_claude_stream_all_branches():
     from agents_on_hand.drivers.claude_stream_driver import ClaudeStreamDriver
+
     d = ClaudeStreamDriver("claude", Path("/tmp"))
     # need to mock emit
     d._emit = MagicMock()
     # assistant with text
-    d._handle_json_msg({"type": "assistant", "message": {"content": [{"type": "text", "text": "hello"}]}})
+    d._handle_json_msg(
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "hello"}]}}
+    )
     # assistant with tool_use
-    d._handle_json_msg({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "bash", "input": {"command": "ls"}}]}})
+    d._handle_json_msg(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "tool_use", "name": "bash", "input": {"command": "ls"}}]
+            },
+        }
+    )
     # assistant empty
     d._handle_json_msg({"type": "assistant", "message": {}})
     d._handle_json_msg({"type": "assistant"})
@@ -30,8 +43,10 @@ def test_claude_stream_all_branches():
         pass
     assert True
 
+
 def test_pi_rpc_all_branches(tmp_path):
     from agents_on_hand.drivers.pi_rpc_driver import PiRPCDriver
+
     d = PiRPCDriver("pi", tmp_path)
     d._emit = MagicMock()
     # various pi rpc messages
@@ -56,12 +71,22 @@ def test_pi_rpc_all_branches(tmp_path):
     assert "pi" in d.command
     d.stop()
 
+
 @pytest.mark.asyncio
 async def test_chat_remaining_branches(tmp_path):
     """Cover chat.py remaining 34 miss: help/esc/ctrlc/text branches."""
-    from agents_on_hand.handlers.chat import help_command, esc_command, ctrlc_command, text_message_router
+    from agents_on_hand.handlers.chat import (
+        ctrlc_command,
+        esc_command,
+        help_command,
+        text_message_router,
+    )
+
     # help with no installed agents
-    with patch("agents_on_hand.handlers.chat.get_installed_cli_agents", return_value={}), patch("agents_on_hand.security.is_user_allowed", return_value=True):
+    with (
+        patch("agents_on_hand.handlers.chat.get_installed_cli_agents", return_value={}),
+        patch("agents_on_hand.security.is_user_allowed", return_value=True),
+    ):
         update = MagicMock()
         update.message = MagicMock()
         update.message.reply_text = AsyncMock()
@@ -69,7 +94,10 @@ async def test_chat_remaining_branches(tmp_path):
         await help_command(update, MagicMock())
         assert update.message.reply_text.called
     # esc with no active
-    with patch("agents_on_hand.handlers.chat.session_manager") as sm, patch("agents_on_hand.security.is_user_allowed", return_value=True):
+    with (
+        patch("agents_on_hand.handlers.chat.session_manager") as sm,
+        patch("agents_on_hand.security.is_user_allowed", return_value=True),
+    ):
         sm.get_active_session.return_value = None
         update2 = MagicMock()
         update2.effective_user = MagicMock(id=1)
@@ -86,7 +114,10 @@ async def test_chat_remaining_branches(tmp_path):
     mock_sess.session_id = "s1"
     mock_sess.agent_name = "Bash"
     mock_sess.send_control_char = MagicMock()
-    with patch("agents_on_hand.handlers.chat.session_manager") as sm, patch("agents_on_hand.security.is_user_allowed", return_value=True):
+    with (
+        patch("agents_on_hand.handlers.chat.session_manager") as sm,
+        patch("agents_on_hand.security.is_user_allowed", return_value=True),
+    ):
         sm.get_active_session.return_value = mock_sess
         for txt in ["esc", "cancel", "!esc", "ctrlc", "ctrl+c", "!ctrlc"]:
             update3 = MagicMock()
@@ -97,17 +128,22 @@ async def test_chat_remaining_branches(tmp_path):
             await text_message_router(update3, MagicMock())
             assert update3.message.reply_text.called
 
+
 @pytest.mark.asyncio
 async def test_session_menu_remaining(tmp_path):
     """Cover session_menu 53 miss: logs/download/kill/switch with bg callback."""
     from agents_on_hand.ui.session_menu import session_action_callback_handler
+
     mock_sess = MagicMock()
     mock_sess.session_id = "sess_rm"
     mock_sess.agent_name = "Bash"
     mock_sess.working_dir = Path("/tmp/rm")
     mock_sess.is_running = True
     mock_sess.get_last_n_lines.return_value = "log"
-    with patch("agents_on_hand.ui.session_menu.session_manager") as sm, patch("agents_on_hand.security.is_user_allowed", return_value=True):
+    with (
+        patch("agents_on_hand.ui.session_menu.session_manager") as sm,
+        patch("agents_on_hand.security.is_user_allowed", return_value=True),
+    ):
         sm.get_session.return_value = mock_sess
         # logs
         q = MagicMock()
@@ -119,7 +155,9 @@ async def test_session_menu_remaining(tmp_path):
         update = MagicMock()
         update.callback_query = q
         ctx = MagicMock()
-        with patch("agents_on_hand.ui.session_menu.format_telegram_code_block", return_value="```logs```"):
+        with patch(
+            "agents_on_hand.ui.session_menu.format_telegram_code_block", return_value="```logs```"
+        ):
             await session_action_callback_handler(update, ctx)
             assert q.message.reply_text.called
         # download no file

@@ -69,23 +69,27 @@ class TestPiRPCDriverProtocol(unittest.TestCase):
     def test_setstatus_is_not_a_tool_request(self):
         """setStatus is a fire-and-forget UI update, not an approval dialog."""
         driver, events = self._make_driver()
-        driver._handle_json_msg({
-            "type": "extension_ui_request",
-            "id": "some-uuid",
-            "method": "setStatus",
-            "statusText": "🔌 MCP: 3 servers enabled",
-        })
+        driver._handle_json_msg(
+            {
+                "type": "extension_ui_request",
+                "id": "some-uuid",
+                "method": "setStatus",
+                "statusText": "🔌 MCP: 3 servers enabled",
+            }
+        )
         self.assertFalse(any(e.event_type == DriverEvent.TOOL_REQUEST for e in events))
 
     def test_interactive_ui_request_becomes_tool_request(self):
         """Interactive methods (confirm/select/input/editor) still raise approvals."""
         driver, events = self._make_driver()
-        driver._handle_json_msg({
-            "type": "extension_ui_request",
-            "id": "req-1",
-            "method": "confirm",
-            "statusText": "Allow bash execution?",
-        })
+        driver._handle_json_msg(
+            {
+                "type": "extension_ui_request",
+                "id": "req-1",
+                "method": "confirm",
+                "statusText": "Allow bash execution?",
+            }
+        )
         reqs = [e for e in events if e.event_type == DriverEvent.TOOL_REQUEST]
         self.assertEqual(len(reqs), 1)
         self.assertEqual(reqs[0].request_id, "req-1")
@@ -93,14 +97,18 @@ class TestPiRPCDriverProtocol(unittest.TestCase):
 
     def test_text_and_thinking_deltas_emitted(self):
         driver, events = self._make_driver()
-        driver._handle_json_msg({
-            "type": "message_update",
-            "assistantMessageEvent": {"type": "text_delta", "delta": "Hello"},
-        })
-        driver._handle_json_msg({
-            "type": "message_update",
-            "assistantMessageEvent": {"type": "thinking_delta", "delta": "hmm"},
-        })
+        driver._handle_json_msg(
+            {
+                "type": "message_update",
+                "assistantMessageEvent": {"type": "text_delta", "delta": "Hello"},
+            }
+        )
+        driver._handle_json_msg(
+            {
+                "type": "message_update",
+                "assistantMessageEvent": {"type": "thinking_delta", "delta": "hmm"},
+            }
+        )
         types = [e.event_type for e in events]
         self.assertIn(DriverEvent.TEXT_DELTA, types)
         self.assertIn(DriverEvent.THOUGHT_DELTA, types)

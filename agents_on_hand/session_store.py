@@ -62,7 +62,9 @@ class JSONSessionStore:
             active_map: dict[int, str] = {int(k): v for k, v in active_raw.items()}
             return sessions, active_map
         except Exception as e:
-            logger.warning(f"State file corrupted ({self.path}): {e}; backing up and returning empty")
+            logger.warning(
+                f"State file corrupted ({self.path}): {e}; backing up and returning empty"
+            )
             try:
                 bak = self.path.with_suffix(".bak")
                 if self.path.exists():

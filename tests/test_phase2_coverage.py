@@ -1,4 +1,5 @@
 """Add coverage for callback_registry and session_store"""
+
 import pathlib
 import tempfile
 import time
@@ -21,15 +22,25 @@ def test_callback_registry_tokens():
     # fail-closed: unknown token -> None (no raw path fallback)
     assert resolve_path_token("nonexistent_token_xyz") is None
 
+
 def test_restart_registry():
     tok = register_restart_info("bash", pathlib.Path("/tmp"))
     assert tok.startswith("r_")
     assert len(tok) == 10
 
+
 def test_session_store_roundtrip():
     tmp = pathlib.Path(tempfile.mktemp(suffix=".json"))
     store = JSONSessionStore(tmp)
-    rec = SessionRecord(session_id="sess_test", user_id=1, agent_key="bash", agent_name="Bash", command="bash", working_dir="/tmp", created_at=time.time())
+    rec = SessionRecord(
+        session_id="sess_test",
+        user_id=1,
+        agent_key="bash",
+        agent_name="Bash",
+        command="bash",
+        working_dir="/tmp",
+        created_at=time.time(),
+    )
     store.save_state([rec], {1: "sess_test"})
     loaded, active = store.load_state()
     assert loaded[0].session_id == "sess_test"

@@ -86,9 +86,13 @@ class ClaudeStreamDriver(BaseDriver):
                     if isinstance(item, dict):
                         b_type = item.get("type")
                         if b_type == "text" and item.get("text"):
-                            self.emit_event(DriverEvent(DriverEvent.TEXT_DELTA, content=item["text"]))
+                            self.emit_event(
+                                DriverEvent(DriverEvent.TEXT_DELTA, content=item["text"])
+                            )
                         elif b_type in ("thinking", "thought") and item.get("thinking"):
-                            self.emit_event(DriverEvent(DriverEvent.THOUGHT_DELTA, content=item["thinking"]))
+                            self.emit_event(
+                                DriverEvent(DriverEvent.THOUGHT_DELTA, content=item["thinking"])
+                            )
 
         elif msg_type == "result":
             res_text = data.get("result")

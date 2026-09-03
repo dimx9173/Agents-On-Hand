@@ -104,6 +104,9 @@ def kill_process_tree(proc: Any, timeout: float = 0.5) -> None:
     except Exception:
         pgid = None
 
+    # System/root pgids (<= 1) must never be signalled — not even via the pid fallback.
+    if pgid is not None and pgid <= 1:
+        return
     # Only kill process group if pgid is valid, > 1, and NOT our own parent/current process group!
     if pgid is not None and pgid > 1 and pgid != current_pgid:
         try:

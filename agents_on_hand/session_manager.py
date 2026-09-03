@@ -3,6 +3,7 @@ Unified Session Manager for Agents-On-Hand with Probing Chain Protocol Driver Ar
 """
 
 import asyncio
+import atexit
 import logging
 import time
 import uuid
@@ -131,7 +132,10 @@ class AgentSession:
                         f"Session {self.session_id} successfully bound to Driver '{driver_name}'"
                     )
                     self.trace.driver_bound(driver_name, True)
-                    self.trace.event("SESSION_INIT", f"agent={self.agent_name} command={self.command} cwd={self.working_dir} driver={driver_name}")
+                    self.trace.event(
+                        "SESSION_INIT",
+                        f"agent={self.agent_name} command={self.command} cwd={self.working_dir} driver={driver_name}",
+                    )
                     return True
 
                 logger.warning(
@@ -140,7 +144,9 @@ class AgentSession:
                 self.trace.driver_bound(driver_name, False)
 
             # Final fallback to PTY Driver
-            logger.warning(f"All probing drivers failed for session {self.session_id}. Falling back to PTY...")
+            logger.warning(
+                f"All probing drivers failed for session {self.session_id}. Falling back to PTY..."
+            )
             self.trace.driver_probe("pty", total, total)
             pty = PTYDriver(self.command, self.working_dir)
             if hasattr(pty, "set_trace"):
@@ -184,11 +190,17 @@ class AgentSession:
             self.trace.thought_delta(len(event.content))
 
         elif event.event_type == DriverEvent.TOOL_REQUEST:
-            self.trace.tool_request(event.request_id, getattr(event, "tool_name", "unknown"), str(getattr(event, "tool_args", "")))
+            self.trace.tool_request(
+                event.request_id,
+                getattr(event, "tool_name", "unknown"),
+                str(getattr(event, "tool_args", "")),
+            )
             self.trace.perm_request(event.request_id, getattr(event, "tool_name", "unknown"))
 
         elif event.event_type == DriverEvent.TOOL_RESULT:
-            self.trace.tool_result(event.request_id, getattr(event, "tool_name", "unknown"), str(event.content)[:200])
+            self.trace.tool_result(
+                event.request_id, getattr(event, "tool_name", "unknown"), str(event.content)[:200]
+            )
 
         elif event.event_type in (DriverEvent.TURN_END, DriverEvent.EXIT):
             # Record response completion timing
@@ -215,8 +227,6 @@ class AgentSession:
                 except Exception as e:
                     logger.error(f"Error in session exit callback: {e}")
 
-
-
     def send_input(self, text: str, turn_id: str | None = None):
         """Send prompt to active driver."""
         if self.driver and self.is_running:
@@ -234,7 +244,6 @@ class AgentSession:
             self._first_token_time = None
             self._response_chars = 0
             self.driver.send_prompt(text)
-
 
     def send_control_char(self, char: str):
         """Send control character (ESC/Ctrl+C) to active driver."""
@@ -258,7 +267,6 @@ class AgentSession:
         Pass None to cancel a previously registered callback.
         """
         self._bg_completion_callback = callback
-
 
     def _attach_listener_to_driver(self, callback: Callable[[DriverEvent], None]):
         """Attach a registered listener to the current active driver."""
@@ -325,7 +333,15 @@ class SessionManager:
         self._on_session_finished_callbacks.append(cb)
 
     def _to_record(self, s: AgentSession) -> SessionRecord:
-        return SessionRecord(session_id=s.session_id, user_id=s.user_id, agent_key=s.agent_key, agent_name=s.agent_name, command=s.command, working_dir=str(s.working_dir), created_at=s.created_at)
+        return SessionRecord(
+            session_id=s.session_id,
+            user_id=s.user_id,
+            agent_key=s.agent_key,
+            agent_name=s.agent_name,
+            command=s.command,
+            working_dir=str(s.working_dir),
+            created_at=s.created_at,
+        )
 
     def _save_to_store(self) -> None:
         try:
@@ -338,7 +354,15 @@ class SessionManager:
         try:
             records, active = self._store.load_state()
             for r in records:
-                s = AgentSession(session_id=r.session_id, user_id=r.user_id, agent_key=r.agent_key, agent_name=r.agent_name, command=r.command, working_dir=Path(r.working_dir), on_exit_callback=self._handle_session_exit)
+                s = AgentSession(
+                    session_id=r.session_id,
+                    user_id=r.user_id,
+                    agent_key=r.agent_key,
+                    agent_name=r.agent_name,
+                    command=r.command,
+                    working_dir=Path(r.working_dir),
+                    on_exit_callback=self._handle_session_exit,
+                )
                 s.is_running = False
                 s.created_at = r.created_at
                 self.sessions[r.session_id] = s
@@ -368,12 +392,14 @@ class SessionManager:
     ) -> AgentSession:
         session_id = f"sess_{uuid.uuid4().hex[:8]}"
 
-        preferred_drivers = ["acp", "pty"]
+        preferred_drivers: list[str] = ["acp", "pty"]
+        agent_name: str
+        command: str
         if agent_key in AVAILABLE_CLI_AGENTS:
             agent_info = AVAILABLE_CLI_AGENTS[agent_key]
-            agent_name = agent_info["name"]
-            command = agent_info["command"]
-            preferred_drivers = agent_info.get("drivers", ["acp", "pty"])
+            agent_name = str(agent_info["name"])
+            command = str(agent_info["command"])
+            preferred_drivers = list(agent_info.get("drivers", ["acp", "pty"]))
         else:
             agent_name = f"Custom ({agent_key})"
             command = custom_command or agent_key
@@ -432,8 +458,7 @@ class SessionManager:
         Returns the number of pruned sessions.
         """
         offline_ids = [
-            sid for sid, s in self.sessions.items()
-            if s.user_id == user_id and not s.is_running
+            sid for sid, s in self.sessions.items() if s.user_id == user_id and not s.is_running
         ]
         count = 0
         for sid in offline_ids:
@@ -456,12 +481,13 @@ class SessionManager:
                     session.stop()
                     count += 1
                 except Exception as e:
-                    logger.error(f"Error stopping session {session.session_id} during shutdown: {e}")
+                    logger.error(
+                        f"Error stopping session {session.session_id} during shutdown: {e}"
+                    )
         if count > 0:
             logger.info(f"Shutdown cleaned up {count} active agent sessions.")
         return count
 
 
 session_manager = SessionManager()
-import atexit
 atexit.register(session_manager.shutdown_all_sessions)

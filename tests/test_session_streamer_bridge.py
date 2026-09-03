@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from agents_on_hand.drivers.base_driver import BaseDriver, DriverEvent
 from agents_on_hand.handlers.chat import text_message_router
-from agents_on_hand.session_manager import DRIVER_MAP, AgentSession, SessionManager
+from agents_on_hand.session_manager import AgentSession, SessionManager
 from agents_on_hand.stream_handler import UnifiedStreamer
 
 
@@ -50,7 +50,11 @@ class TestSessionStreamerBridge(unittest.IsolatedAsyncioTestCase):
         session.register_listener(lambda ev: received_events.append(ev))
 
         driver = MockDriver("opencode acp", Path("/tmp/test_cwd"))
-        with patch.dict("agents_on_hand.session_manager.DRIVER_MAP", {"acp": lambda *a, **kw: driver}, clear=False):
+        with patch.dict(
+            "agents_on_hand.session_manager.DRIVER_MAP",
+            {"acp": lambda *a, **kw: driver},
+            clear=False,
+        ):
             started = await session.start(["acp"])
             self.assertTrue(started)
             self.assertEqual(session.driver, driver)
@@ -82,7 +86,11 @@ class TestSessionStreamerBridge(unittest.IsolatedAsyncioTestCase):
         streamer.start()
 
         driver = MockDriver("opencode acp", Path("/tmp/test_cwd"))
-        with patch.dict("agents_on_hand.session_manager.DRIVER_MAP", {"acp": lambda *a, **kw: driver}, clear=False):
+        with patch.dict(
+            "agents_on_hand.session_manager.DRIVER_MAP",
+            {"acp": lambda *a, **kw: driver},
+            clear=False,
+        ):
             await session.start(["acp"])
 
         driver.emit_event(DriverEvent(DriverEvent.TEXT_DELTA, content="hihi 👋 — how can I help?"))
@@ -130,8 +138,10 @@ class TestSessionStreamerBridge(unittest.IsolatedAsyncioTestCase):
         context = MagicMock()
         context.bot = MagicMock()
 
-        with patch("agents_on_hand.handlers.chat.session_manager", mock_sm), \
-             patch("agents_on_hand.security.is_user_allowed", return_value=True):
+        with (
+            patch("agents_on_hand.handlers.chat.session_manager", mock_sm),
+            patch("agents_on_hand.security.is_user_allowed", return_value=True),
+        ):
             await text_message_router(update, context)
 
         for call in update.message.reply_text.call_args_list:
@@ -146,13 +156,21 @@ class TestSessionStreamerBridge(unittest.IsolatedAsyncioTestCase):
         sm.sessions.clear()
         sm.user_active_session.clear()
 
-        s_online = AgentSession("sess_online", 1005, "opencode", "OpenCode", "opencode acp", Path("/tmp"))
+        s_online = AgentSession(
+            "sess_online", 1005, "opencode", "OpenCode", "opencode acp", Path("/tmp")
+        )
         s_online.is_running = True
-        s_offline1 = AgentSession("sess_offline1", 1005, "opencode", "OpenCode", "opencode acp", Path("/tmp"))
+        s_offline1 = AgentSession(
+            "sess_offline1", 1005, "opencode", "OpenCode", "opencode acp", Path("/tmp")
+        )
         s_offline1.is_running = False
-        s_offline2 = AgentSession("sess_offline2", 1005, "opencode", "OpenCode", "opencode acp", Path("/tmp"))
+        s_offline2 = AgentSession(
+            "sess_offline2", 1005, "opencode", "OpenCode", "opencode acp", Path("/tmp")
+        )
         s_offline2.is_running = False
-        s_other_user = AgentSession("sess_other", 9999, "opencode", "OpenCode", "opencode acp", Path("/tmp"))
+        s_other_user = AgentSession(
+            "sess_other", 9999, "opencode", "OpenCode", "opencode acp", Path("/tmp")
+        )
         s_other_user.is_running = False
 
         sm.sessions["sess_online"] = s_online
@@ -186,8 +204,10 @@ class TestSessionStreamerBridge(unittest.IsolatedAsyncioTestCase):
 
         context = MagicMock()
 
-        with patch("agents_on_hand.ui.session_menu.session_manager", sm), \
-             patch("agents_on_hand.security.is_user_allowed", return_value=True):
+        with (
+            patch("agents_on_hand.ui.session_menu.session_manager", sm),
+            patch("agents_on_hand.security.is_user_allowed", return_value=True),
+        ):
             await session_action_callback_handler(update, context)
 
         sm.prune_offline_sessions.assert_called_once_with(1006)

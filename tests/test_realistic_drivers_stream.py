@@ -1,15 +1,21 @@
 """Realistic driver & stream & security journeys — towards 70%."""
-from pathlib import Path
+
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
+
 
 @pytest.mark.asyncio
 async def test_driver_probing_chain_success_and_fallback(tmp_path):
     """Probe acp success -> use acp; acp fail -> fallback pty."""
     from agents_on_hand.session_manager import SessionManager
-    from agents_on_hand.drivers.base_driver import DriverEvent
+
     # success case: mock ACPDriver.start to succeed
-    with patch("agents_on_hand.session_manager.ACPDriver") as MockACP, patch("agents_on_hand.session_manager.PTYDriver") as MockPTY:
+    with (
+        patch("agents_on_hand.session_manager.ACPDriver") as MockACP,
+        patch("agents_on_hand.session_manager.PTYDriver") as MockPTY,
+    ):
         mock_acp = MagicMock()
         mock_acp.start = AsyncMock(return_value=True)
         mock_acp.register_listener = MagicMock()
@@ -32,13 +38,15 @@ async def test_driver_probing_chain_success_and_fallback(tmp_path):
         # should have tried pty fallback internally
         assert sess2.active_driver_name in ("pty", "acp")
 
+
 @pytest.mark.asyncio
 async def test_stream_large_output_splitting():
     """Stream large output >3800 chars splits into multiple Telegram messages."""
-    from agents_on_hand.stream_handler import UnifiedStreamer, split_text_into_chunks
     from agents_on_hand.drivers.base_driver import DriverEvent
+    from agents_on_hand.stream_handler import UnifiedStreamer, split_text_into_chunks
+
     # pure split
-    assert len(split_text_into_chunks("a"*8000, max_chars=3800)) == 3
+    assert len(split_text_into_chunks("a" * 8000, max_chars=3800)) == 3
     # streamer with large text
     sess = MagicMock()
     sess.session_id = "sess_large"
@@ -51,7 +59,7 @@ async def test_stream_large_output_splitting():
     streamer = UnifiedStreamer(bot=bot, chat_id=1, session=sess, edit_interval=0.01)
     streamer.start()
     # send large text delta
-    large = "x"*5000
+    large = "x" * 5000
     evt = DriverEvent(event_type=DriverEvent.TEXT_DELTA, content=large)
     streamer._on_driver_event(evt)
     # trigger flush
@@ -60,23 +68,30 @@ async def test_stream_large_output_splitting():
     streamer.stop()
     assert 0 < len(streamer.current_text) <= 5000
 
+
 @pytest.mark.asyncio
 async def test_stream_tool_dedup_and_markdown_fallback():
     """Tool request dedup and Markdown fallback on BadRequest."""
-    from agents_on_hand.stream_handler import UnifiedStreamer
-    from agents_on_hand.drivers.base_driver import DriverEvent
     from telegram.error import BadRequest
+
+    from agents_on_hand.drivers.base_driver import DriverEvent
+    from agents_on_hand.stream_handler import UnifiedStreamer
+
     sess = MagicMock()
     sess.session_id = "sess_tool"
     sess.register_listener = MagicMock()
     sess.unregister_listener = MagicMock()
     bot = MagicMock()
-    bot.send_message = AsyncMock(side_effect=[BadRequest("Can't parse entities"), MagicMock(message_id=2)])
+    bot.send_message = AsyncMock(
+        side_effect=[BadRequest("Can't parse entities"), MagicMock(message_id=2)]
+    )
     bot.edit_message_text = AsyncMock(side_effect=BadRequest("Message is not modified"))
     streamer = UnifiedStreamer(bot=bot, chat_id=1, session=sess)
     streamer.start()
     # tool request
-    evt = DriverEvent(event_type=DriverEvent.TOOL_REQUEST, request_id="req1", tool_name="bash", tool_args="ls")
+    evt = DriverEvent(
+        event_type=DriverEvent.TOOL_REQUEST, request_id="req1", tool_name="bash", tool_args="ls"
+    )
     streamer._on_driver_event(evt)
     await asyncio.sleep(0.1)
     # duplicate should be ignored
@@ -92,12 +107,18 @@ async def test_stream_tool_dedup_and_markdown_fallback():
     assert res == 123
     streamer.stop()
 
+
 def test_security_path_and_user_whitelist():
     """Realistic security: whitelist and sandbox."""
-    from agents_on_hand.config import is_user_allowed, is_path_allowed, _parse_user_ids
     import pathlib
+
+    from agents_on_hand.config import is_path_allowed, is_user_allowed
+
     # user whitelist
-    with patch("agents_on_hand.config.ALLOWED_TELEGRAM_USER_IDS", {123}), patch("agents_on_hand.config.DEV_ALLOW_ALL", False):
+    with (
+        patch("agents_on_hand.config.ALLOWED_TELEGRAM_USER_IDS", {123}),
+        patch("agents_on_hand.config.DEV_ALLOW_ALL", False),
+    ):
         assert is_user_allowed(123) is True
         assert is_user_allowed(999) is False
     with patch("agents_on_hand.config.DEV_ALLOW_ALL", True):
@@ -110,17 +131,28 @@ def test_security_path_and_user_whitelist():
         assert is_path_allowed(pathlib.Path("/etc/passwd")) is False
         assert is_path_allowed(pathlib.Path("/tmp/allowed_test/../etc/passwd")) is False
 
+
 def test_ansi_and_session_log(tmp_path):
     """ANSI cleaning and session log reading."""
-    from agents_on_hand.ansi_cleaner import strip_ansi_codes, clean_cli_output, format_telegram_code_block
+    from agents_on_hand.ansi_cleaner import (
+        clean_cli_output,
+        format_telegram_code_block,
+        strip_ansi_codes,
+    )
     from agents_on_hand.session_manager import AgentSession
+
     assert strip_ansi_codes("\x1b[31mred\x1b[0m") == "red"
     assert "hello" in clean_cli_output("hello\nworld")
     assert "```" in format_telegram_code_block("log line", max_chars=100)
     # session log
-    sess = AgentSession(session_id="sess_log", user_id=1, agent_key="bash", agent_name="Bash", command="bash", working_dir=tmp_path)
+    sess = AgentSession(
+        session_id="sess_log",
+        user_id=1,
+        agent_key="bash",
+        agent_name="Bash",
+        command="bash",
+        working_dir=tmp_path,
+    )
     sess.log_file_path.write_text("line1\nline2\nline3")
     assert "line3" in sess.get_last_n_lines(n=1)
     assert "line1" in sess.get_last_n_lines(n=10)
-
-import asyncio

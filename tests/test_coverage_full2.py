@@ -1,12 +1,13 @@
 import asyncio
-import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 
 def test_extract_acp_text_delta_variants():
-    from agents_on_hand.drivers.acp_driver import extract_acp_text_delta, _extract_text_from_node
+    from agents_on_hand.drivers.acp_driver import _extract_text_from_node, extract_acp_text_delta
+
     assert extract_acp_text_delta({}) == ""
     assert extract_acp_text_delta(None) == ""
     assert extract_acp_text_delta({"content": "hello"}) == "hello"
@@ -24,7 +25,12 @@ def test_extract_acp_text_delta_variants():
     assert _extract_text_from_node("") == ""
     assert _extract_text_from_node(None) == ""
     assert _extract_text_from_node(123) == ""
-    assert _extract_text_from_node('{"session_id": "x", "hook_event_name": "y", "transcript_path": "z"}') == ""
+    assert (
+        _extract_text_from_node(
+            '{"session_id": "x", "hook_event_name": "y", "transcript_path": "z"}'
+        )
+        == ""
+    )
     assert _extract_text_from_node("plain") == "plain"
     assert _extract_text_from_node({"text": "t"}) == "t"
     assert _extract_text_from_node({"delta": "d"}) == "d"
@@ -35,6 +41,7 @@ def test_extract_acp_text_delta_variants():
 
 def test_acp_driver_on_update():
     from agents_on_hand.drivers.acp_driver import ACPDriver
+
     d = ACPDriver("omp", Path("/tmp"))
     events = []
     d._listeners = [lambda e: events.append(e)]
@@ -45,7 +52,9 @@ def test_acp_driver_on_update():
     events.clear()
     d._on_acp_update({"update": "not dict"})
     events.clear()
-    d._on_acp_update({"update": {"sessionUpdate": "tool_result", "content": "result text", "tool_name": "bash"}})
+    d._on_acp_update(
+        {"update": {"sessionUpdate": "tool_result", "content": "result text", "tool_name": "bash"}}
+    )
     assert any(e.event_type == "tool_result" for e in events)
     events.clear()
     d._on_acp_update({"update": {"sessionUpdate": "postToolUse", "output": "out"}})
@@ -67,6 +76,7 @@ def test_acp_driver_on_update():
 @pytest.mark.asyncio
 async def test_acp_driver_start_and_monitor():
     from agents_on_hand.drivers.acp_driver import ACPDriver
+
     d = ACPDriver("omp", Path("/tmp"))
     mock_client = MagicMock()
     mock_client.start = AsyncMock()
@@ -96,6 +106,7 @@ async def test_acp_driver_start_and_monitor():
 
 def test_acp_driver_send():
     from agents_on_hand.drivers.acp_driver import ACPDriver
+
     d = ACPDriver("omp", Path("/tmp"))
     d.send_prompt("hi")
     d.send_control_char("\x03")
@@ -126,6 +137,7 @@ def test_acp_driver_send():
 @pytest.mark.asyncio
 async def test_acp_driver_respond():
     from agents_on_hand.drivers.acp_driver import ACPDriver
+
     d = ACPDriver("omp", Path("/tmp"))
     await d.respond_permission(1, True)
     mock_client = MagicMock()
@@ -137,6 +149,7 @@ async def test_acp_driver_respond():
 
 def test_acp_driver_stop():
     from agents_on_hand.drivers.acp_driver import ACPDriver
+
     d = ACPDriver("omp", Path("/tmp"))
     d.stop()
     mock_client = MagicMock()
@@ -149,6 +162,7 @@ def test_acp_driver_stop():
 
 def test_acp_session_extract():
     from agents_on_hand.drivers.acp_driver import extract_acp_text_delta
+
     assert extract_acp_text_delta({}) == ""
     assert extract_acp_text_delta(None) == ""
     assert extract_acp_text_delta({"content": "hi"}) == "hi"
@@ -165,6 +179,7 @@ def test_acp_session_extract():
 @pytest.mark.asyncio
 async def test_acp_client_handle():
     from agents_on_hand.acp_client import ACPClient
+
     c = ACPClient("echo", "/tmp")
     fut = asyncio.get_running_loop().create_future()
     c._pending_requests[1] = fut
@@ -182,10 +197,10 @@ async def test_acp_client_handle():
     c._listeners = [lambda p: (_ for _ in ()).throw(Exception("err"))]
     c._handle_json_msg({"method": "session/update", "params": {}})
     perm_events = []
-    c._permission_listeners = [lambda i,p: perm_events.append((i,p))]
+    c._permission_listeners = [lambda i, p: perm_events.append((i, p))]
     c._handle_json_msg({"method": "agent/request_permission", "id": 10, "params": {"name": "tool"}})
     assert len(perm_events) == 1
-    c._permission_listeners = [lambda i,p: (_ for _ in ()).throw(Exception("err"))]
+    c._permission_listeners = [lambda i, p: (_ for _ in ()).throw(Exception("err"))]
     c._handle_json_msg({"method": "permission/request", "id": 11, "params": {}})
     c._handle_json_msg({"method": "unknown", "params": {}})
     c._handle_json_msg({"jsonrpc": "2.0", "method": "notify", "params": {}})
@@ -194,6 +209,7 @@ async def test_acp_client_handle():
 @pytest.mark.asyncio
 async def test_acp_client_call_and_send():
     from agents_on_hand.acp_client import ACPClient
+
     c = ACPClient("echo", "/tmp")
     with pytest.raises(RuntimeError):
         await c.call_method("test", {}, timeout=1)
@@ -204,9 +220,11 @@ async def test_acp_client_call_and_send():
     mock_proc.stdin = mock_stdin
     c.process = mock_proc
     c.is_running = True
+
     async def fake_wait(fut, timeout):
         fut.set_result({"ok": 1})
         return await fut
+
     with patch("asyncio.wait_for", side_effect=fake_wait):
         result = await c.call_method("initialize", {}, timeout=1)
         assert result == {"ok": 1}
@@ -238,15 +256,18 @@ async def test_acp_client_call_and_send():
 @pytest.mark.asyncio
 async def test_acp_client_read_loop():
     from agents_on_hand.acp_client import ACPClient
+
     c = ACPClient("echo", "/tmp")
     c.is_running = True
     mock_stdout = AsyncMock()
-    mock_stdout.readline = AsyncMock(side_effect=[
-        b'{"id": 1, "result": {}}\n',
-        b'not json\n',
-        b'  \n',
-        b'',
-    ])
+    mock_stdout.readline = AsyncMock(
+        side_effect=[
+            b'{"id": 1, "result": {}}\n',
+            b"not json\n",
+            b"  \n",
+            b"",
+        ]
+    )
     mock_proc = MagicMock()
     mock_proc.stdout = mock_stdout
     c.process = mock_proc
@@ -267,14 +288,18 @@ async def test_acp_client_read_loop():
     mock_proc3.stdout = mock_stdout3
     mock_proc3.stdout.readuntil = AsyncMock(side_effect=Exception("fail"))
     c.process = mock_proc3
-    mock_stdout3.readline = AsyncMock(side_effect=[ValueError("limit"), b''])
+    mock_stdout3.readline = AsyncMock(side_effect=[ValueError("limit"), b""])
     c.process.stdout = mock_stdout3
     await c._read_loop()
 
 
 @pytest.mark.asyncio
 async def test_session_menu():
-    from agents_on_hand.ui.session_menu import sessions_command, prune_command, session_action_callback_handler
+    from agents_on_hand.ui.session_menu import (
+        prune_command,
+        sessions_command,
+    )
+
     mock_session = MagicMock()
     mock_session.session_id = "sid1"
     mock_session.agent_name = "claude"
@@ -320,7 +345,13 @@ async def test_session_menu():
 
 @pytest.mark.asyncio
 async def test_directory_browser():
-    from agents_on_hand.ui.directory_browser import send_directory_browser, directory_callback_handler, show_agent_selector, agent_start_callback_handler
+    from agents_on_hand.ui.directory_browser import (
+        agent_start_callback_handler,
+        directory_callback_handler,
+        send_directory_browser,
+        show_agent_selector,
+    )
+
     tmp = Path("/tmp")
     update = MagicMock()
     update.effective_user = MagicMock(id=1)
@@ -343,18 +374,39 @@ async def test_directory_browser():
         await directory_callback_handler(upd, MagicMock())
     query.data = "dir:nav:token:0"
     with patch("agents_on_hand.security.is_user_allowed", return_value=True):
-        with patch("agents_on_hand.ui.directory_browser.resolve_path_token", return_value=tmp), patch("agents_on_hand.ui.directory_browser.send_directory_browser", new_callable=AsyncMock) as mock_send:
+        with (
+            patch("agents_on_hand.ui.directory_browser.resolve_path_token", return_value=tmp),
+            patch(
+                "agents_on_hand.ui.directory_browser.send_directory_browser", new_callable=AsyncMock
+            ) as mock_send,
+        ):
             await directory_callback_handler(upd, MagicMock())
+            mock_send.assert_called_once()
     query.data = "dir:select:token"
     with patch("agents_on_hand.security.is_user_allowed", return_value=True):
-        with patch("agents_on_hand.ui.directory_browser.resolve_path_token", return_value=tmp), patch("agents_on_hand.ui.directory_browser.show_agent_selector", new_callable=AsyncMock) as mock_show:
+        with (
+            patch("agents_on_hand.ui.directory_browser.resolve_path_token", return_value=tmp),
+            patch(
+                "agents_on_hand.ui.directory_browser.show_agent_selector", new_callable=AsyncMock
+            ) as mock_show,
+        ):
             await directory_callback_handler(upd, MagicMock())
+            mock_show.assert_called_once()
     q2 = MagicMock()
     q2.edit_message_text = AsyncMock()
-    with patch("agents_on_hand.ui.directory_browser.get_installed_cli_agents", return_value={}), patch("agents_on_hand.ui.directory_browser.get_path_token", return_value="tok"):
+    with (
+        patch("agents_on_hand.ui.directory_browser.get_installed_cli_agents", return_value={}),
+        patch("agents_on_hand.ui.directory_browser.get_path_token", return_value="tok"),
+    ):
         await show_agent_selector(q2, tmp)
     q2.edit_message_text.assert_called()
-    with patch("agents_on_hand.ui.directory_browser.get_installed_cli_agents", return_value={"claude": {"name": "Claude", "use_acp": False}}), patch("agents_on_hand.ui.directory_browser.get_path_token", return_value="tok"):
+    with (
+        patch(
+            "agents_on_hand.ui.directory_browser.get_installed_cli_agents",
+            return_value={"claude": {"name": "Claude", "use_acp": False}},
+        ),
+        patch("agents_on_hand.ui.directory_browser.get_path_token", return_value="tok"),
+    ):
         await show_agent_selector(q2, tmp)
     upd2 = MagicMock()
     upd2.callback_query = MagicMock()
@@ -365,7 +417,13 @@ async def test_directory_browser():
     upd2.callback_query.edit_message_text = AsyncMock()
     mock_context = MagicMock()
     mock_context.bot.send_message = AsyncMock()
-    with patch("agents_on_hand.security.is_user_allowed", return_value=True), patch("agents_on_hand.ui.directory_browser.resolve_path_token", return_value=tmp), patch("agents_on_hand.ui.directory_browser.is_path_allowed", return_value=True), patch("agents_on_hand.ui.directory_browser.session_manager") as mock_sm, patch("agents_on_hand.ui.directory_browser.create_streamer_for_session") as mock_create:
+    with (
+        patch("agents_on_hand.security.is_user_allowed", return_value=True),
+        patch("agents_on_hand.ui.directory_browser.resolve_path_token", return_value=tmp),
+        patch("agents_on_hand.ui.directory_browser.is_path_allowed", return_value=True),
+        patch("agents_on_hand.ui.directory_browser.session_manager") as mock_sm,
+        patch("agents_on_hand.ui.directory_browser.create_streamer_for_session") as mock_create,
+    ):
         mock_create.return_value = MagicMock(start=MagicMock())
         mock_session = MagicMock(session_id="sid", agent_name="claude", working_dir=tmp)
         mock_sm.create_session.return_value = mock_session
@@ -379,12 +437,22 @@ async def test_directory_browser():
     upd3.callback_query.answer = AsyncMock()
     upd3.callback_query.message = MagicMock(chat_id=123)
     upd3.callback_query.edit_message_text = AsyncMock()
-    with patch("agents_on_hand.security.is_user_allowed", return_value=True), patch("agents_on_hand.ui.directory_browser.resolve_path_token", return_value=None), patch("agents_on_hand.ui.directory_browser.session_manager") as mock_sm2:
+    with (
+        patch("agents_on_hand.security.is_user_allowed", return_value=True),
+        patch("agents_on_hand.ui.directory_browser.resolve_path_token", return_value=None),
+        patch("agents_on_hand.ui.directory_browser.session_manager") as mock_sm2,
+    ):
         await agent_start_callback_handler(upd3, mock_context)
     mock_sm2.create_session.assert_not_called()
     upd3.callback_query.edit_message_text.assert_called()
     # fail-closed: dir:select with expired token -> alert, no agent selector
     query.data = "dir:select:expired"
-    with patch("agents_on_hand.security.is_user_allowed", return_value=True), patch("agents_on_hand.ui.directory_browser.resolve_path_token", return_value=None) as mock_resolve_expired, patch("agents_on_hand.ui.directory_browser.show_agent_selector", new_callable=AsyncMock) as mock_show2:
+    with (
+        patch("agents_on_hand.security.is_user_allowed", return_value=True),
+        patch("agents_on_hand.ui.directory_browser.resolve_path_token", return_value=None),
+        patch(
+            "agents_on_hand.ui.directory_browser.show_agent_selector", new_callable=AsyncMock
+        ) as mock_show2,
+    ):
         await directory_callback_handler(upd, MagicMock())
     mock_show2.assert_not_called()

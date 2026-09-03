@@ -13,11 +13,9 @@ class TestACPEngine(unittest.TestCase):
         client.register_listener(lambda p: updates.append(p))
 
         # Simulate incoming agent/update notification
-        client._handle_json_msg({
-            "jsonrpc": "2.0",
-            "method": "agent/update",
-            "params": {"content": "Hello from ACP"}
-        })
+        client._handle_json_msg(
+            {"jsonrpc": "2.0", "method": "agent/update", "params": {"content": "Hello from ACP"}}
+        )
 
         self.assertEqual(len(updates), 1)
         self.assertEqual(updates[0]["content"], "Hello from ACP")
@@ -28,12 +26,14 @@ class TestACPEngine(unittest.TestCase):
         client.register_permission_listener(lambda req_id, params: perms.append((req_id, params)))
 
         # Simulate incoming permission request from agent
-        client._handle_json_msg({
-            "jsonrpc": "2.0",
-            "id": 101,
-            "method": "agent/request_permission",
-            "params": {"name": "bash", "args": "rm -rf /tmp/test"}
-        })
+        client._handle_json_msg(
+            {
+                "jsonrpc": "2.0",
+                "id": 101,
+                "method": "agent/request_permission",
+                "params": {"name": "bash", "args": "rm -rf /tmp/test"},
+            }
+        )
 
         self.assertEqual(len(perms), 1)
         self.assertEqual(perms[0][0], 101)
@@ -47,7 +47,7 @@ class TestACPEngine(unittest.TestCase):
                 "content": [
                     {"type": "content", "content": {"type": "text", "text": "File list: "}},
                     {"type": "content", "content": {"type": "text", "text": "main.py"}},
-                ]
+                ],
             }
         }
         self.assertEqual(extract_acp_text_delta(params), "File list: main.py")
@@ -63,25 +63,24 @@ class TestACPEngine(unittest.TestCase):
         driver.register_listener(events.append)
 
         # Tool result event
-        driver._on_acp_update({
-            "update": {
-                "sessionUpdate": "toolResult",
-                "tool_name": "bash",
-                "content": "output from bash command"
+        driver._on_acp_update(
+            {
+                "update": {
+                    "sessionUpdate": "toolResult",
+                    "tool_name": "bash",
+                    "content": "output from bash command",
+                }
             }
-        })
+        )
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].event_type, DriverEvent.TOOL_RESULT)
         self.assertEqual(events[0].tool_name, "bash")
         self.assertEqual(events[0].content, "output from bash command")
 
         # Text delta event
-        driver._on_acp_update({
-            "update": {
-                "sessionUpdate": "agentMessageChunk",
-                "content": "Here is the summary."
-            }
-        })
+        driver._on_acp_update(
+            {"update": {"sessionUpdate": "agentMessageChunk", "content": "Here is the summary."}}
+        )
         self.assertEqual(len(events), 2)
         self.assertEqual(events[1].event_type, DriverEvent.TEXT_DELTA)
         self.assertEqual(events[1].content, "Here is the summary.")

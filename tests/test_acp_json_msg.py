@@ -1,9 +1,13 @@
 """Cover ACP JSON handling — realistic responsible use cases."""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+
 
 def test_acp_handle_json_msg_branches():
     from agents_on_hand.acp_client import ACPClient
+
     c = ACPClient("echo", "/tmp")
     # register listeners to capture
     updates = []
@@ -16,7 +20,9 @@ def test_acp_handle_json_msg_branches():
     # Case 2: notification with method update
     c._handle_json_msg({"method": "update", "params": {"content": "hello"}})
     # Case 3: permission request
-    c._handle_json_msg({"id": 99, "method": "requestPermission", "params": {"tool": "bash", "args": "ls"}})
+    c._handle_json_msg(
+        {"id": 99, "method": "requestPermission", "params": {"tool": "bash", "args": "ls"}}
+    )
     # Case 4: unknown method
     c._handle_json_msg({"method": "unknown", "params": {}})
     # Case 5: malformed
@@ -26,8 +32,10 @@ def test_acp_handle_json_msg_branches():
     c._handle_json_msg({"id": 2, "error": {"code": -1, "message": "fail"}})
     assert True
 
+
 def test_acp_extract_delta_comprehensive():
     from agents_on_hand.drivers.acp_driver import extract_acp_text_delta
+
     assert extract_acp_text_delta({"content": "a"}) == "a"
     assert extract_acp_text_delta({"delta": "b"}) == "b"
     assert extract_acp_text_delta({"update": {"content": "c"}}) == "c"
@@ -37,9 +45,11 @@ def test_acp_extract_delta_comprehensive():
     assert extract_acp_text_delta({}) == ""
     assert extract_acp_text_delta(None) == ""
 
+
 @pytest.mark.asyncio
 async def test_acp_client_send_and_permission(tmp_path):
     from agents_on_hand.acp_client import ACPClient
+
     c = ACPClient("echo", str(tmp_path))
     # mock process
     mock_proc = MagicMock()
@@ -60,8 +70,10 @@ async def test_acp_client_send_and_permission(tmp_path):
         pass
     assert True
 
+
 def test_pty_driver_listeners_and_send(tmp_path):
     from agents_on_hand.drivers.pty_driver import PTYDriver
+
     d = PTYDriver("bash", tmp_path)
     cb = MagicMock()
     d.register_listener(cb)
@@ -73,9 +85,11 @@ def test_pty_driver_listeners_and_send(tmp_path):
     assert len(d._listeners) == 0
     d.stop()
 
+
 @pytest.mark.asyncio
 async def test_session_manager_full_lifecycle(tmp_path):
     from agents_on_hand.session_manager import SessionManager
+
     with patch("agents_on_hand.session_manager.AgentSession.start", new_callable=AsyncMock):
         mgr = SessionManager(store_path=tmp_path / "state.json")
         s1 = mgr.create_session(user_id=1, agent_key="bash", working_dir=tmp_path)
@@ -89,7 +103,15 @@ async def test_session_manager_full_lifecycle(tmp_path):
         assert mgr.get_session(s1.session_id) is None
         # prune offline (create offline)
         from agents_on_hand.session_manager import AgentSession
-        s_off = AgentSession(session_id="off", user_id=2, agent_key="bash", agent_name="Bash", command="bash", working_dir=tmp_path)
+
+        s_off = AgentSession(
+            session_id="off",
+            user_id=2,
+            agent_key="bash",
+            agent_name="Bash",
+            command="bash",
+            working_dir=tmp_path,
+        )
         s_off.is_running = False
         mgr.sessions["off"] = s_off
         mgr.user_active_session[2] = "off"

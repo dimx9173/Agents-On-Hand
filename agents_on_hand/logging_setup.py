@@ -78,10 +78,10 @@ class _SanitizingFilter(logging.Filter):
 # Console formatter (with colour on TTY)
 # ─────────────────────────────────────────────
 _COLOURS = {
-    "DEBUG": "\033[36m",     # cyan
-    "INFO": "\033[32m",      # green
-    "WARNING": "\033[33m",   # yellow
-    "ERROR": "\033[31m",     # red
+    "DEBUG": "\033[36m",  # cyan
+    "INFO": "\033[32m",  # green
+    "WARNING": "\033[33m",  # yellow
+    "ERROR": "\033[31m",  # red
     "CRITICAL": "\033[35m",  # magenta
     "RESET": "\033[0m",
 }
@@ -149,9 +149,7 @@ def setup_logging(level: int | None = None) -> None:
     console_handler.setLevel(level)
     use_colour = os.isatty(1)  # only colour when stdout is a terminal
     if use_colour:
-        console_handler.setFormatter(
-            _ColouredFormatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
-        )
+        console_handler.setFormatter(_ColouredFormatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
     else:
         console_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
     console_handler.addFilter(sanitizer)
@@ -168,14 +166,13 @@ def setup_logging(level: int | None = None) -> None:
     for noisy in ("httpx", "httpcore", "telegram", "apscheduler"):
         logging.getLogger(noisy).setLevel(noisy_level)
 
-    logging.getLogger("AgentsOnHand").info(
-        f"Logging initialised — app log: {APP_LOG_FILE}"
-    )
+    logging.getLogger("AgentsOnHand").info(f"Logging initialised — app log: {APP_LOG_FILE}")
 
 
 # ─────────────────────────────────────────────
 # Per-session structured trace logger
 # ─────────────────────────────────────────────
+
 
 class SessionTraceLogger:
     """
@@ -257,36 +254,52 @@ class SessionTraceLogger:
         """Record streamer stop."""
         self._write("STREAMER_STOP", f"type={streamer_type}")
 
-    def streamer_switch(self, from_session: str | None, to_session: str, reason: str = "user_switch") -> None:
+    def streamer_switch(
+        self, from_session: str | None, to_session: str, reason: str = "user_switch"
+    ) -> None:
         """Record session switch event."""
-        self._write("STREAMER_SWITCH", f"from={from_session or 'none'} to={to_session} reason={reason}")
+        self._write(
+            "STREAMER_SWITCH", f"from={from_session or 'none'} to={to_session} reason={reason}"
+        )
 
     def agent_first_token(self, agent: str, elapsed_s: float, turn_id: str | None = None) -> None:
         """Record first-token timing (TTFT) for an agent response."""
         tid = turn_id or self._current_turn_id or "unknown"
         self._write("AGENT_TTFT", f"turn_id={tid} agent={agent} ttft={elapsed_s:.3f}s")
 
-    def agent_response_done(self, agent: str, chars: int, elapsed_s: float, turn_id: str | None = None) -> None:
+    def agent_response_done(
+        self, agent: str, chars: int, elapsed_s: float, turn_id: str | None = None
+    ) -> None:
         """Record completion of an agent response."""
         tid = turn_id or self._current_turn_id or "unknown"
-        self._write("AGENT_DONE", f"turn_id={tid} agent={agent} chars={chars} elapsed={elapsed_s:.3f}s")
+        self._write(
+            "AGENT_DONE", f"turn_id={tid} agent={agent} chars={chars} elapsed={elapsed_s:.3f}s"
+        )
 
     def thought_delta(self, chars: int, turn_id: str | None = None) -> None:
         """Record agent thinking/reasoning delta."""
         tid = turn_id or self._current_turn_id or "unknown"
         self._write("THOUGHT_DELTA", f"turn_id={tid} chars={chars}")
 
-    def tool_request(self, req_id, tool_name: str, tool_args: str = "", turn_id: str | None = None) -> None:
+    def tool_request(
+        self, req_id, tool_name: str, tool_args: str = "", turn_id: str | None = None
+    ) -> None:
         """Record a tool permission request."""
         tid = turn_id or self._current_turn_id or "unknown"
         safe_args = _sanitize(str(tool_args)[:200])
-        self._write("TOOL_REQUEST", f"turn_id={tid} req_id={req_id} tool={tool_name} args={safe_args}")
+        self._write(
+            "TOOL_REQUEST", f"turn_id={tid} req_id={req_id} tool={tool_name} args={safe_args}"
+        )
 
-    def tool_result(self, req_id, tool_name: str, content_preview: str, turn_id: str | None = None) -> None:
+    def tool_result(
+        self, req_id, tool_name: str, content_preview: str, turn_id: str | None = None
+    ) -> None:
         """Record tool execution result."""
         tid = turn_id or self._current_turn_id or "unknown"
         safe_preview = _sanitize(str(content_preview)[:200])
-        self._write("TOOL_RESULT", f"turn_id={tid} req_id={req_id} tool={tool_name} preview={safe_preview}")
+        self._write(
+            "TOOL_RESULT", f"turn_id={tid} req_id={req_id} tool={tool_name} preview={safe_preview}"
+        )
 
     def perm_request(self, req_id, tool_name: str, turn_id: str | None = None) -> None:
         """Record permission request sent to user."""
@@ -302,24 +315,38 @@ class SessionTraceLogger:
         """Record an ACP JSON-RPC call with timing."""
         tid = turn_id or self._current_turn_id or "unknown"
         status = "OK" if ok else "ERR"
-        self._write("ACP_CALL", f"turn_id={tid} method={method} elapsed={elapsed_s:.3f}s status={status}")
+        self._write(
+            "ACP_CALL", f"turn_id={tid} method={method} elapsed={elapsed_s:.3f}s status={status}"
+        )
 
     def acp_session_id(self, session_id: str) -> None:
         """Record ACP session ID for correlation."""
         self._write("ACP_SESSION_ID", f"acp_session_id={session_id}")
 
-    def tg_deliver(self, msg_id: int | None, chars: int, is_edit: bool, is_final: bool, turn_id: str | None = None) -> None:
+    def tg_deliver(
+        self,
+        msg_id: int | None,
+        chars: int,
+        is_edit: bool,
+        is_final: bool,
+        turn_id: str | None = None,
+    ) -> None:
         """Record Telegram message delivery (send or edit)."""
         tid = turn_id or self._current_turn_id or "unknown"
         action = "edit" if is_edit else "send"
-        self._write("TG_DELIVER", f"turn_id={tid} msg_id={msg_id or 'new'} chars={chars} action={action} final={is_final}")
+        self._write(
+            "TG_DELIVER",
+            f"turn_id={tid} msg_id={msg_id or 'new'} chars={chars} action={action} final={is_final}",
+        )
 
     def bg_completion(self, turn_id: str | None = None, notification_sent: bool = False) -> None:
         """Record background completion event."""
         tid = turn_id or self._current_turn_id or "unknown"
         self._write("BG_COMPLETION", f"turn_id={tid} notification_sent={notification_sent}")
 
-    def turn_end(self, turn_id: str | None = None, driver: str = "", reason: str = "normal") -> None:
+    def turn_end(
+        self, turn_id: str | None = None, driver: str = "", reason: str = "normal"
+    ) -> None:
         """Record turn end with driver and reason."""
         tid = turn_id or self._current_turn_id or "unknown"
         self._write("TURN_END", f"turn_id={tid} driver={driver} reason={reason}")

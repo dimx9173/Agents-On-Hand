@@ -10,7 +10,7 @@ from telegram.ext import (
     filters,
 )
 
-from .config import ALLOWED_TELEGRAM_USER_IDS, TELEGRAM_BOT_TOKEN
+from .config import ALLOWED_TELEGRAM_USER_IDS, TELEGRAM_BOT_TOKEN, ensure_runtime_dirs
 from .handlers.acp_permissions import acp_permission_callback_handler
 from .handlers.chat import (
     ctrlc_command,
@@ -32,7 +32,11 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
     logger.error("Exception while handling an update:", exc_info=context.error)
     # Also trace to session if resolvable
     try:
-        uid = getattr(getattr(update, "effective_user", None), "id", None) if isinstance(update, Update) else None
+        uid = (
+            getattr(getattr(update, "effective_user", None), "id", None)
+            if isinstance(update, Update)
+            else None
+        )
         if uid:
             sess = session_manager.get_active_session(uid)
             if sess:
@@ -51,6 +55,7 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
 
 
 async def post_init(application: Application) -> None:
+    ensure_runtime_dirs()
     bot_commands = [
         BotCommand("aoh_new", "📂 開啟目錄選擇器與啟動 CLI Agent"),
         BotCommand("aoh_sessions", "📋 管理與切換背景 Session"),
@@ -80,7 +85,9 @@ async def post_init(application: Application) -> None:
     )
     for user_id in ALLOWED_TELEGRAM_USER_IDS:
         try:
-            await application.bot.send_message(chat_id=user_id, text=greeting_text, parse_mode="Markdown")
+            await application.bot.send_message(
+                chat_id=user_id, text=greeting_text, parse_mode="Markdown"
+            )
             logger.info(f"Startup greeting sent to user {user_id}")
         except Exception as e:
             logger.warning(f"Could not send startup greeting to user {user_id}: {e}")
@@ -92,15 +99,20 @@ def main() -> None:
         print("❌ 錯誤：請先在 .env 或環境變數中設定 TELEGRAM_BOT_TOKEN！")
         return
     from .config import ALLOWED_TELEGRAM_USER_IDS, DEV_ALLOW_ALL
+
     if not ALLOWED_TELEGRAM_USER_IDS and not DEV_ALLOW_ALL:
         print("❌ 錯誤：ALLOWED_TELEGRAM_USER_IDS 為空且未設置 AOH_DEV_ALLOW_ALL_USERS=1。")
-        print("   請在 .env 中設置 ALLOWED_TELEGRAM_USER_IDS（例如 12345678）或設置 AOH_DEV_ALLOW_ALL_USERS=1 以允許所有用戶（僅開發用）。")
+        print(
+            "   請在 .env 中設置 ALLOWED_TELEGRAM_USER_IDS（例如 12345678）或設置 AOH_DEV_ALLOW_ALL_USERS=1 以允許所有用戶（僅開發用）。"
+        )
         return
     from .handlers.restart import on_background_session_finished as _cb
+
     session_manager.register_on_finished_callback(_cb)
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
     # sync runtime.bot_app reference
     import agents_on_hand.runtime as _rt
+
     _rt.bot_app = app
     bot_app = app
     app.add_error_handler(global_error_handler)
@@ -118,7 +130,9 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(agent_start_callback_handler, pattern=r"^agent:"))
     app.add_handler(CallbackQueryHandler(session_action_callback_handler, pattern=r"^sess:"))
     app.add_handler(CallbackQueryHandler(acp_permission_callback_handler, pattern=r"^acp_perm:"))
-    app.add_handler(CallbackQueryHandler(session_restart_callback_handler, pattern=r"^sess_restart:"))
+    app.add_handler(
+        CallbackQueryHandler(session_restart_callback_handler, pattern=r"^sess_restart:")
+    )
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, text_message_router))
     app.add_handler(MessageHandler(filters.COMMAND, text_message_router))
     print("🚀 Agents-On-Hand (Direct Chat Mode) 啟動中...")

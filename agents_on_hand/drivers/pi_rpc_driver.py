@@ -133,8 +133,6 @@ class PiRPCDriver(BaseDriver):
         elif msg_type in ("turn_end", "agent_end", "agent_settled"):
             self.emit_event(DriverEvent(DriverEvent.TURN_END))
 
-
-
     def send_prompt(self, text: str):
         """Send prompt JSON message to pi stdio stdin."""
         if self.process and self.process.stdin and self.is_running:

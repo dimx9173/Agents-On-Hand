@@ -29,9 +29,7 @@ def _make_bot():
 
 def _rendered_texts(bot):
     """All text payloads sent or edited, in call order."""
-    texts = [
-        call.kwargs.get("text") for call in bot.send_message.call_args_list
-    ] + [
+    texts = [call.kwargs.get("text") for call in bot.send_message.call_args_list] + [
         call.kwargs.get("text") for call in bot.edit_message_text.call_args_list
     ]
     return [t for t in texts if t is not None]
@@ -45,16 +43,12 @@ class TestStreamCompleteness(unittest.TestCase):
         async def run_test():
             bot = _make_bot()
             session = MagicMock()
-            streamer = UnifiedStreamer(
-                bot=bot, chat_id=12345, session=session, edit_interval=0.3
-            )
+            streamer = UnifiedStreamer(bot=bot, chat_id=12345, session=session, edit_interval=0.3)
             streamer.start()
 
             chunks = ["Hi", "! How can ", "I help you today?"]
             for chunk in chunks:
-                streamer._on_driver_event(
-                    DriverEvent(DriverEvent.TEXT_DELTA, content=chunk)
-                )
+                streamer._on_driver_event(DriverEvent(DriverEvent.TEXT_DELTA, content=chunk))
                 await asyncio.sleep(0.01)
 
             full_text = "".join(chunks)
@@ -82,18 +76,12 @@ class TestStreamCompleteness(unittest.TestCase):
             bot = _make_bot()
             ok_msg = MagicMock()
             ok_msg.message_id = 7
-            bot.send_message = AsyncMock(
-                side_effect=[BadRequest("Can't parse entities"), ok_msg]
-            )
+            bot.send_message = AsyncMock(side_effect=[BadRequest("Can't parse entities"), ok_msg])
             session = MagicMock()
-            streamer = UnifiedStreamer(
-                bot=bot, chat_id=12345, session=session, edit_interval=0.1
-            )
+            streamer = UnifiedStreamer(bot=bot, chat_id=12345, session=session, edit_interval=0.1)
             streamer.start()
 
-            streamer._on_driver_event(
-                DriverEvent(DriverEvent.TEXT_DELTA, content="a *broken md")
-            )
+            streamer._on_driver_event(DriverEvent(DriverEvent.TEXT_DELTA, content="a *broken md"))
             await asyncio.sleep(0.5)
 
             streamer.stop()
@@ -119,13 +107,9 @@ class TestStreamCompleteness(unittest.TestCase):
 
         async def run_test():
             bot = _make_bot()
-            bot.edit_message_text = AsyncMock(
-                side_effect=BadRequest("Can't parse entities")
-            )
+            bot.edit_message_text = AsyncMock(side_effect=BadRequest("Can't parse entities"))
             session = MagicMock()
-            streamer = UnifiedStreamer(
-                bot=bot, chat_id=12345, session=session, edit_interval=0.1
-            )
+            streamer = UnifiedStreamer(bot=bot, chat_id=12345, session=session, edit_interval=0.1)
             streamer.start()
 
             streamer._on_driver_event(
@@ -133,9 +117,7 @@ class TestStreamCompleteness(unittest.TestCase):
             )
             await asyncio.sleep(0.3)
             # Trigger an edit (message already exists now)
-            streamer._on_driver_event(
-                DriverEvent(DriverEvent.TEXT_DELTA, content=" + second")
-            )
+            streamer._on_driver_event(DriverEvent(DriverEvent.TEXT_DELTA, content=" + second"))
             await asyncio.sleep(0.5)
 
             streamer.stop()
@@ -150,6 +132,7 @@ class TestStreamCompleteness(unittest.TestCase):
             self.assertTrue(last.kwargs.get("parse_mode") is None)
 
         asyncio.run(run_test())
+
     def test_new_prompt_starts_new_message(self):
         """Each new user prompt must start a fresh Telegram message instead of
         appending the response onto the previous message."""
@@ -162,22 +145,16 @@ class TestStreamCompleteness(unittest.TestCase):
             msg2.message_id = 200
             bot.send_message = AsyncMock(side_effect=[msg1, msg2])
             session = MagicMock()
-            streamer = UnifiedStreamer(
-                bot=bot, chat_id=12345, session=session, edit_interval=0.1
-            )
+            streamer = UnifiedStreamer(bot=bot, chat_id=12345, session=session, edit_interval=0.1)
             streamer.start()
 
             # First prompt response
-            streamer._on_driver_event(
-                DriverEvent(DriverEvent.TEXT_DELTA, content="answer one")
-            )
+            streamer._on_driver_event(DriverEvent(DriverEvent.TEXT_DELTA, content="answer one"))
             await asyncio.sleep(0.5)
 
             # User sends a second prompt
             streamer.notify_user_input()
-            streamer._on_driver_event(
-                DriverEvent(DriverEvent.TEXT_DELTA, content="answer two")
-            )
+            streamer._on_driver_event(DriverEvent(DriverEvent.TEXT_DELTA, content="answer two"))
             await asyncio.sleep(0.5)
 
             streamer.stop()
@@ -204,9 +181,7 @@ class TestStreamCompleteness(unittest.TestCase):
             bot.send_message = AsyncMock(side_effect=[msg1, msg2, msg3])
 
             session = MagicMock()
-            streamer = UnifiedStreamer(
-                bot=bot, chat_id=12345, session=session, edit_interval=0.1
-            )
+            streamer = UnifiedStreamer(bot=bot, chat_id=12345, session=session, edit_interval=0.1)
             streamer.start()
 
             # Emit ~8000 characters with newlines

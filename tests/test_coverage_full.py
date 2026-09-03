@@ -1,11 +1,13 @@
 import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 
 def test_claude_init_variants():
     from agents_on_hand.drivers.claude_stream_driver import ClaudeStreamDriver
+
     d1 = ClaudeStreamDriver("claude", Path("/tmp"))
     assert "--output-format=stream-json" in d1.command
     assert "--verbose" in d1.command
@@ -18,22 +20,33 @@ def test_claude_init_variants():
 
 def test_claude_handle_json_msg_all_branches():
     from agents_on_hand.drivers.claude_stream_driver import ClaudeStreamDriver, DriverEvent
+
     d = ClaudeStreamDriver("claude", Path("/tmp"))
     events = []
     d._listeners = [lambda e: events.append(e)]
-    d._handle_json_msg({"type": "assistant", "message": {"content": [{"type": "text", "text": "hello"}]}})
+    d._handle_json_msg(
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "hello"}]}}
+    )
     assert any(e.content == "hello" for e in events)
     events.clear()
-    d._handle_json_msg({"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "think"}]}})
+    d._handle_json_msg(
+        {"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "think"}]}}
+    )
     assert any(e.event_type == DriverEvent.THOUGHT_DELTA for e in events)
     events.clear()
-    d._handle_json_msg({"type": "assistant", "message": {"content": [{"type": "thought", "thinking": "t2"}]}})
+    d._handle_json_msg(
+        {"type": "assistant", "message": {"content": [{"type": "thought", "thinking": "t2"}]}}
+    )
     events.clear()
     d._handle_json_msg({"type": "assistant", "message": {}})
     d._handle_json_msg({"type": "assistant"})
     d._handle_json_msg({"type": "assistant", "message": {"content": "not a list"}})
-    d._handle_json_msg({"type": "assistant", "message": {"content": [{"type": "text", "text": ""}]}})
-    d._handle_json_msg({"type": "assistant", "message": {"content": [{"type": "tool", "text": "x"}]}})
+    d._handle_json_msg(
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": ""}]}}
+    )
+    d._handle_json_msg(
+        {"type": "assistant", "message": {"content": [{"type": "tool", "text": "x"}]}}
+    )
     d._handle_json_msg({"type": "assistant", "message": {"content": [{"text": "no type"}]}})
     d._handle_json_msg({"type": "assistant", "message": {"content": ["not dict"]}})
     d._handle_json_msg({"type": "result", "result": "ok result"})
@@ -66,13 +79,16 @@ def test_claude_handle_json_msg_all_branches():
 @pytest.mark.asyncio
 async def test_claude_start_success_and_fail():
     from agents_on_hand.drivers.claude_stream_driver import ClaudeStreamDriver
+
     d = ClaudeStreamDriver("claude", Path("/tmp"))
     mock_process = MagicMock()
     mock_process.stdout = AsyncMock()
     mock_process.stderr = AsyncMock()
     mock_process.stdin = MagicMock()
     mock_process.stdin.drain = AsyncMock()
-    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_process) as mock_exec:
+    with patch(
+        "asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_process
+    ) as mock_exec:
         with patch("asyncio.create_task") as mock_task:
             mock_task.return_value = MagicMock()
             result = await d.start()
@@ -90,16 +106,19 @@ async def test_claude_start_success_and_fail():
 @pytest.mark.asyncio
 async def test_claude_read_loop():
     from agents_on_hand.drivers.claude_stream_driver import ClaudeStreamDriver
+
     d = ClaudeStreamDriver("claude", Path("/tmp"))
     d.is_running = True
     mock_stdout = AsyncMock()
-    mock_stdout.readline = AsyncMock(side_effect=[
-        b'{"type": "assistant", "message": {"content": [{"type": "text", "text": "hi"}]}}\n',
-        b'not json line\n',
-        b'   \n',
-        b'{"type": "result", "result": "done"}\n',
-        b'',
-    ])
+    mock_stdout.readline = AsyncMock(
+        side_effect=[
+            b'{"type": "assistant", "message": {"content": [{"type": "text", "text": "hi"}]}}\n',
+            b"not json line\n",
+            b"   \n",
+            b'{"type": "result", "result": "done"}\n',
+            b"",
+        ]
+    )
     mock_process = MagicMock()
     mock_process.stdout = mock_stdout
     d.process = mock_process
@@ -113,6 +132,7 @@ async def test_claude_read_loop():
 @pytest.mark.asyncio
 async def test_claude_read_loop_cancel():
     from agents_on_hand.drivers.claude_stream_driver import ClaudeStreamDriver
+
     d = ClaudeStreamDriver("claude", Path("/tmp"))
     d.is_running = True
     mock_stdout = AsyncMock()
@@ -127,6 +147,7 @@ async def test_claude_read_loop_cancel():
 @pytest.mark.asyncio
 async def test_claude_read_loop_exception():
     from agents_on_hand.drivers.claude_stream_driver import ClaudeStreamDriver
+
     d = ClaudeStreamDriver("claude", Path("/tmp"))
     d.is_running = True
     mock_stdout = AsyncMock()
@@ -140,6 +161,7 @@ async def test_claude_read_loop_exception():
 
 def test_claude_send_and_stop():
     from agents_on_hand.drivers.claude_stream_driver import ClaudeStreamDriver
+
     d = ClaudeStreamDriver("claude", Path("/tmp"))
     d.send_prompt("hello")
     d.send_control_char("\x03")
@@ -158,7 +180,7 @@ def test_claude_send_and_stop():
     mock_process.terminate.assert_called()
     d.process.stdin = mock_stdin
     d.is_running = True
-    with patch.object(d.process.stdin, 'drain', new_callable=AsyncMock):
+    with patch.object(d.process.stdin, "drain", new_callable=AsyncMock):
         asyncio.run(d.respond_permission("req1", True))
         asyncio.run(d.respond_permission("req1", False))
     d.process.stdin = None
@@ -174,23 +196,39 @@ def test_claude_send_and_stop():
 
 def test_pi_init_and_handle():
     from agents_on_hand.drivers.pi_rpc_driver import PiRPCDriver
+
     d = PiRPCDriver("pi", Path("/tmp"))
     assert "--mode rpc" in d.command
     d2 = PiRPCDriver("pi --mode rpc", Path("/tmp"))
     assert d2.command == "pi --mode rpc"
     events = []
     d._listeners = [lambda e: events.append(e)]
-    d._handle_json_msg({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "hi"}})
+    d._handle_json_msg(
+        {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "hi"}}
+    )
     assert any("hi" in e.content for e in events)
     events.clear()
-    d._handle_json_msg({"type": "message_update", "assistantMessageEvent": {"type": "thinking_delta", "delta": "think"}})
-    d._handle_json_msg({"type": "message_update", "assistantMessageEvent": {"type": "thinking", "delta": "think2"}})
+    d._handle_json_msg(
+        {
+            "type": "message_update",
+            "assistantMessageEvent": {"type": "thinking_delta", "delta": "think"},
+        }
+    )
+    d._handle_json_msg(
+        {"type": "message_update", "assistantMessageEvent": {"type": "thinking", "delta": "think2"}}
+    )
     events.clear()
     d._handle_json_msg({"type": "message_update", "assistantMessageEvent": "not dict"})
-    d._handle_json_msg({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": ""}})
-    d._handle_json_msg({"type": "message_update", "assistantMessageEvent": {"type": "other", "delta": "x"}})
+    d._handle_json_msg(
+        {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": ""}}
+    )
+    d._handle_json_msg(
+        {"type": "message_update", "assistantMessageEvent": {"type": "other", "delta": "x"}}
+    )
     d._handle_json_msg({"type": "message_update"})
-    d._handle_json_msg({"type": "extension_ui_request", "method": "confirm", "id": "1", "statusText": "ok"})
+    d._handle_json_msg(
+        {"type": "extension_ui_request", "method": "confirm", "id": "1", "statusText": "ok"}
+    )
     assert any(e.event_type == "tool_request" for e in events)
     events.clear()
     d._handle_json_msg({"type": "extension_ui_request", "method": "select", "id": "2"})
@@ -213,6 +251,7 @@ def test_pi_init_and_handle():
 @pytest.mark.asyncio
 async def test_pi_start_and_loops():
     from agents_on_hand.drivers.pi_rpc_driver import PiRPCDriver
+
     d = PiRPCDriver("pi", Path("/tmp"))
     mock_process = MagicMock()
     mock_process.stdout = AsyncMock()
@@ -235,16 +274,19 @@ async def test_pi_start_and_loops():
 @pytest.mark.asyncio
 async def test_pi_read_loop():
     from agents_on_hand.drivers.pi_rpc_driver import PiRPCDriver
+
     d = PiRPCDriver("pi", Path("/tmp"))
     d.is_running = True
     mock_stdout = AsyncMock()
-    mock_stdout.readline = AsyncMock(side_effect=[
-        b'{"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "hi"}}\n',
-        b'not json\n',
-        b'  \n',
-        b'{"type": "turn_end"}\n',
-        b'',
-    ])
+    mock_stdout.readline = AsyncMock(
+        side_effect=[
+            b'{"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "hi"}}\n',
+            b"not json\n",
+            b"  \n",
+            b'{"type": "turn_end"}\n',
+            b"",
+        ]
+    )
     mock_process = MagicMock()
     mock_process.stdout = mock_stdout
     mock_process.returncode = 0
@@ -259,6 +301,7 @@ async def test_pi_read_loop():
 @pytest.mark.asyncio
 async def test_pi_drain_stderr():
     from agents_on_hand.drivers.pi_rpc_driver import PiRPCDriver
+
     d = PiRPCDriver("pi", Path("/tmp"))
     d.is_running = True
     mock_stderr = AsyncMock()
@@ -271,6 +314,7 @@ async def test_pi_drain_stderr():
 
 def test_pi_send_methods():
     from agents_on_hand.drivers.pi_rpc_driver import PiRPCDriver
+
     d = PiRPCDriver("pi", Path("/tmp"))
     d.send_prompt("hi")
     d.send_control_char("x")
@@ -305,6 +349,7 @@ def test_pi_send_methods():
 
 def test_bot_imports():
     import agents_on_hand.bot as bot
+
     assert hasattr(bot, "main")
     assert hasattr(bot, "restricted")
     assert "main" in bot.__all__
@@ -315,7 +360,14 @@ def test_bot_imports():
 @pytest.mark.asyncio
 async def test_help_command():
     from agents_on_hand.handlers.chat import help_command
-    with patch("agents_on_hand.handlers.chat.get_installed_cli_agents", return_value={"claude": {"name": "Claude", "use_acp": False}, "omp": {"name": "OMP", "use_acp": True}}):
+
+    with patch(
+        "agents_on_hand.handlers.chat.get_installed_cli_agents",
+        return_value={
+            "claude": {"name": "Claude", "use_acp": False},
+            "omp": {"name": "OMP", "use_acp": True},
+        },
+    ):
         update = MagicMock()
         update.effective_user = MagicMock(id=1)
         update.message = MagicMock()
@@ -329,7 +381,8 @@ async def test_help_command():
 
 @pytest.mark.asyncio
 async def test_esc_ctrlc_stop_no_session():
-    from agents_on_hand.handlers.chat import esc_command, ctrlc_command, stop_command
+    from agents_on_hand.handlers.chat import ctrlc_command, esc_command, stop_command
+
     for cmd in [esc_command, ctrlc_command, stop_command]:
         with patch("agents_on_hand.handlers.chat.session_manager") as mock_sm:
             mock_sm.get_active_session.return_value = None
@@ -345,7 +398,8 @@ async def test_esc_ctrlc_stop_no_session():
 
 @pytest.mark.asyncio
 async def test_esc_ctrlc_with_session():
-    from agents_on_hand.handlers.chat import esc_command, ctrlc_command
+    from agents_on_hand.handlers.chat import ctrlc_command, esc_command
+
     for cmd in [esc_command, ctrlc_command]:
         mock_session = MagicMock()
         mock_session.is_running = True
@@ -367,13 +421,14 @@ async def test_esc_ctrlc_with_session():
 @pytest.mark.asyncio
 async def test_stop_with_session():
     from agents_on_hand.handlers.chat import stop_command
+
     mock_session = MagicMock()
     mock_session.session_id = "sid1"
     mock_session.agent_name = "claude"
     with patch("agents_on_hand.handlers.chat.session_manager") as mock_sm:
         mock_sm.get_active_session.return_value = mock_session
         mock_sm.kill_session.return_value = True
-        with patch("agents_on_hand.handlers.chat.active_streamers", {}) as mock_streamers:
+        with patch("agents_on_hand.handlers.chat.active_streamers", {}):
             update = MagicMock()
             update.effective_user = MagicMock(id=1)
             update.message = MagicMock()
@@ -398,6 +453,7 @@ async def test_stop_with_session():
 @pytest.mark.asyncio
 async def test_text_router_no_session():
     from agents_on_hand.handlers.chat import text_message_router
+
     with patch("agents_on_hand.handlers.chat.session_manager") as mock_sm:
         mock_sm.get_active_session.return_value = None
         mock_sm.user_active_session = {}
@@ -418,6 +474,7 @@ async def test_text_router_no_session():
 @pytest.mark.asyncio
 async def test_text_router_esc_shortcuts():
     from agents_on_hand.handlers.chat import text_message_router
+
     for txt in ["esc", "ESC", "!esc", "cancel", "!cancel"]:
         mock_session = MagicMock()
         mock_session.is_running = True
@@ -458,6 +515,7 @@ async def test_text_router_esc_shortcuts():
 @pytest.mark.asyncio
 async def test_text_router_normal_flow():
     from agents_on_hand.handlers.chat import text_message_router
+
     mock_session = MagicMock()
     mock_session.is_running = True
     mock_session.session_id = "sid"
@@ -480,8 +538,11 @@ async def test_text_router_normal_flow():
         mock_streamer.notify_user_input = MagicMock()
         with patch("agents_on_hand.security.is_user_allowed", return_value=True):
             with patch("agents_on_hand.handlers.chat.active_streamers", {1: mock_streamer}):
-                with patch("agents_on_hand.handlers.chat.create_streamer_for_session") as mock_create:
+                with patch(
+                    "agents_on_hand.handlers.chat.create_streamer_for_session"
+                ) as mock_create:
                     await text_message_router(update, context)
+                    mock_create.assert_not_called()
                     # send_input now includes turn_id for trace correlation
                     assert mock_session.send_input.called
                     assert mock_session.send_input.call_args[0][0] == "hello world"
@@ -491,6 +552,7 @@ async def test_text_router_normal_flow():
 @pytest.mark.asyncio
 async def test_text_router_is_starting():
     from agents_on_hand.handlers.chat import text_message_router
+
     mock_session = MagicMock()
     mock_session.is_running = False
     mock_session.is_starting = True
@@ -515,7 +577,9 @@ async def test_text_router_is_starting():
 @pytest.mark.asyncio
 async def test_global_error_handler_variants():
     from telegram import Update as TgUpdate
+
     from agents_on_hand.app import global_error_handler
+
     mock_cq_msg = MagicMock()
     mock_cq_msg.reply_text = AsyncMock()
     mock_cq = MagicMock()
@@ -552,8 +616,9 @@ async def test_global_error_handler_variants():
 
 @pytest.mark.asyncio
 async def test_post_init():
-    from agents_on_hand.app import post_init
     from agents_on_hand import config as cfg
+    from agents_on_hand.app import post_init
+
     mock_bot = MagicMock()
     mock_bot.set_my_commands = AsyncMock()
     mock_bot.send_message = AsyncMock()
@@ -585,7 +650,11 @@ async def test_post_init():
 def test_main_no_token():
     import agents_on_hand.app as app_mod
     from agents_on_hand import config as cfg
-    with patch.object(app_mod, "TELEGRAM_BOT_TOKEN", ""), patch.object(cfg, "TELEGRAM_BOT_TOKEN", ""):
+
+    with (
+        patch.object(app_mod, "TELEGRAM_BOT_TOKEN", ""),
+        patch.object(cfg, "TELEGRAM_BOT_TOKEN", ""),
+    ):
         with patch("builtins.print") as mock_print:
             app_mod.main()
             mock_print.assert_called()
@@ -594,7 +663,14 @@ def test_main_no_token():
 def test_main_no_users(capsys):
     import agents_on_hand.app as app_mod
     from agents_on_hand import config as cfg
-    with patch.object(app_mod, "TELEGRAM_BOT_TOKEN", "123:abc"), patch.object(cfg, "TELEGRAM_BOT_TOKEN", "123:abc"), patch.object(cfg, "ALLOWED_TELEGRAM_USER_IDS", set()), patch.object(cfg, "DEV_ALLOW_ALL", False), patch.object(app_mod, "ALLOWED_TELEGRAM_USER_IDS", set()):
+
+    with (
+        patch.object(app_mod, "TELEGRAM_BOT_TOKEN", "123:abc"),
+        patch.object(cfg, "TELEGRAM_BOT_TOKEN", "123:abc"),
+        patch.object(cfg, "ALLOWED_TELEGRAM_USER_IDS", set()),
+        patch.object(cfg, "DEV_ALLOW_ALL", False),
+        patch.object(app_mod, "ALLOWED_TELEGRAM_USER_IDS", set()),
+    ):
         app_mod.main()
     out = capsys.readouterr().out
     assert "ALLOWED_TELEGRAM_USER_IDS" in out
@@ -602,6 +678,7 @@ def test_main_no_users(capsys):
 
 def test_main_success():
     import agents_on_hand.app as app_mod
+
     mock_app = MagicMock()
     mock_builder = MagicMock()
     mock_builder.token.return_value = mock_builder
@@ -613,6 +690,8 @@ def test_main_success():
     with patch.object(app_mod, "TELEGRAM_BOT_TOKEN", "fake-token"):
         with patch.object(app_mod, "ALLOWED_TELEGRAM_USER_IDS", {123}):
             with patch("telegram.ext.Application.builder", return_value=mock_builder):
-                with patch("agents_on_hand.session_manager.session_manager.register_on_finished_callback"):
+                with patch(
+                    "agents_on_hand.session_manager.session_manager.register_on_finished_callback"
+                ):
                     app_mod.main()
                     mock_app.run_polling.assert_called_once()

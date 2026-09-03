@@ -1,10 +1,17 @@
-import pathlib
 from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
+
 def test_callback_registry_eviction():
-    from agents_on_hand.callback_registry import path_registry, path_to_token, get_path_token, _MAX_PATH_TOKENS
+    from agents_on_hand.callback_registry import (
+        _MAX_PATH_TOKENS,
+        get_path_token,
+        path_registry,
+        path_to_token,
+    )
+
     path_registry.clear()
     path_to_token.clear()
     # fill to cap
@@ -14,9 +21,16 @@ def test_callback_registry_eviction():
     # ensure eviction happened: first token should be gone or registry bounded
     assert len(path_registry) == _MAX_PATH_TOKENS or len(path_registry) <= _MAX_PATH_TOKENS + 1
 
+
 def test_resolve_path_token_fail_closed():
     """Unknown/expired tokens resolve to None (fail closed), never to a raw path."""
-    from agents_on_hand.callback_registry import path_registry, path_to_token, get_path_token, resolve_path_token
+    from agents_on_hand.callback_registry import (
+        get_path_token,
+        path_registry,
+        path_to_token,
+        resolve_path_token,
+    )
+
     path_registry.clear()
     path_to_token.clear()
     # unknown token -> None
@@ -27,23 +41,34 @@ def test_resolve_path_token_fail_closed():
     tok = get_path_token(Path("/tmp/roundtrip_dir"))
     assert resolve_path_token(tok) == Path("/tmp/roundtrip_dir").resolve()
 
+
 def test_config_parse_edge():
     from agents_on_hand.config import _parse_user_ids
+
     assert _parse_user_ids("") == set()
     assert _parse_user_ids("  ") == set()
-    assert _parse_user_ids("1,,2") == {1,2}
+    assert _parse_user_ids("1,,2") == {1, 2}
     try:
         _parse_user_ids("x")
-        assert False
+        pytest.fail("expected ValueError for invalid user id")
     except ValueError:
         pass
 
+
 def test_session_manager_list_and_prune(tmp_path):
-    from agents_on_hand.session_manager import SessionManager, AgentSession
+    from agents_on_hand.session_manager import AgentSession, SessionManager
+
     mgr = SessionManager(store_path=tmp_path / "state.json")
     # create two offline sessions
     for i in range(2):
-        s = AgentSession(session_id=f"sess_{i}", user_id=1, agent_key="bash", agent_name="Bash", command="bash", working_dir=tmp_path)
+        s = AgentSession(
+            session_id=f"sess_{i}",
+            user_id=1,
+            agent_key="bash",
+            agent_name="Bash",
+            command="bash",
+            working_dir=tmp_path,
+        )
         s.is_running = False
         mgr.sessions[s.session_id] = s
     mgr.user_active_session[1] = "sess_0"
@@ -52,9 +77,11 @@ def test_session_manager_list_and_prune(tmp_path):
     assert count == 2
     assert len(mgr.sessions) == 0
 
+
 @pytest.mark.asyncio
 async def test_session_menu_switch_branch():
     from agents_on_hand.ui.session_menu import session_action_callback_handler
+
     mock_sess = MagicMock()
     mock_sess.session_id = "sess_x"
     mock_sess.agent_name = "Bash"
@@ -76,7 +103,14 @@ async def test_session_menu_switch_branch():
         ctx = MagicMock()
         ctx.bot = MagicMock()
         ctx.bot.send_message = AsyncMock()
-        with patch("agents_on_hand.ui.session_menu.create_streamer_for_session") as mk_streamer, patch("agents_on_hand.ui.session_menu.format_telegram_code_block", return_value="```code```"), patch("agents_on_hand.security.is_user_allowed", return_value=True):
+        with (
+            patch("agents_on_hand.ui.session_menu.create_streamer_for_session") as mk_streamer,
+            patch(
+                "agents_on_hand.ui.session_menu.format_telegram_code_block",
+                return_value="```code```",
+            ),
+            patch("agents_on_hand.security.is_user_allowed", return_value=True),
+        ):
             mk_streamer.return_value = MagicMock()
             mk_streamer.return_value.start = MagicMock()
             update = MagicMock()

@@ -51,8 +51,13 @@ async def esc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     except Exception:
         pass
     active_session.send_control_char("\x1b")
-    logger.info(f"[TG->AGENT] user={user_id} session={active_session.session_id} control=ESC delivered")
-    await update.message.reply_text(f"⏸️ 已傳送 *ESC* 中斷訊號至 `{active_session.agent_name}` (`{active_session.session_id}`)", parse_mode="Markdown")
+    logger.info(
+        f"[TG->AGENT] user={user_id} session={active_session.session_id} control=ESC delivered"
+    )
+    await update.message.reply_text(
+        f"⏸️ 已傳送 *ESC* 中斷訊號至 `{active_session.agent_name}` (`{active_session.session_id}`)",
+        parse_mode="Markdown",
+    )
 
 
 @restricted
@@ -69,8 +74,13 @@ async def ctrlc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     except Exception:
         pass
     active_session.send_control_char("\x03")
-    logger.info(f"[TG->AGENT] user={user_id} session={active_session.session_id} control=CtrlC delivered")
-    await update.message.reply_text(f"🛑 已傳送 *Ctrl+C* 中斷訊號至 `{active_session.agent_name}` (`{active_session.session_id}`)", parse_mode="Markdown")
+    logger.info(
+        f"[TG->AGENT] user={user_id} session={active_session.session_id} control=CtrlC delivered"
+    )
+    await update.message.reply_text(
+        f"🛑 已傳送 *Ctrl+C* 中斷訊號至 `{active_session.agent_name}` (`{active_session.session_id}`)",
+        parse_mode="Markdown",
+    )
 
 
 @restricted
@@ -85,7 +95,10 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if user_id in active_streamers:
             active_streamers[user_id].stop()
             del active_streamers[user_id]
-        await update.message.reply_text(f"🛑 已結束作用中的 Session: `{active_session.agent_name}` (`{session_id}`)", parse_mode="Markdown")
+        await update.message.reply_text(
+            f"🛑 已結束作用中的 Session: `{active_session.agent_name}` (`{session_id}`)",
+            parse_mode="Markdown",
+        )
     else:
         await update.message.reply_text("❌ 結束 Session 失敗。")
 
@@ -94,6 +107,7 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     import time as _time
     import uuid as _uuid
+
     _route_start = _time.monotonic()
     _turn_id = _uuid.uuid4().hex[:8]
     user_id = update.effective_user.id
@@ -110,9 +124,14 @@ async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE
     # so a prompt sent right after /aoh_new is not dropped. Bounded: ~3.2s max,
     # then tell the user the session is still starting instead of blocking longer.
     if active_session and getattr(active_session, "is_starting", False):
-        logger.info(f"[WAIT] turn_id={_turn_id} session={active_session.session_id} is starting, waiting briefly...")
+        logger.info(
+            f"[WAIT] turn_id={_turn_id} session={active_session.session_id} is starting, waiting briefly..."
+        )
         try:
-            active_session.trace.event("TURN_START", f"turn_id={_turn_id} state=waiting_for_start text_len={len(user_text)}")
+            active_session.trace.event(
+                "TURN_START",
+                f"turn_id={_turn_id} state=waiting_for_start text_len={len(user_text)}",
+            )
         except Exception:
             pass
         for _ in range(8):
@@ -133,27 +152,45 @@ async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         if active_session:
             try:
-                active_session.trace.error(f"turn_id={_turn_id} TG message dropped — session offline", turn_id=_turn_id)
+                active_session.trace.error(
+                    f"turn_id={_turn_id} TG message dropped — session offline", turn_id=_turn_id
+                )
             except Exception:
                 pass
         reply_markup = None
         if active_session:
             rst_token = register_restart_info(active_session.agent_key, active_session.working_dir)
-            reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 重新啟動 Agent", callback_data=f"sess_restart:{rst_token}")]])
-        await update.message.reply_text("⚠️ *當前 Session 已離線 / 進程結束*\n請點擊下方按鈕重新啟動，或發送 `/aoh_new` 建立新 Session。", reply_markup=reply_markup, parse_mode="Markdown")
+            reply_markup = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "🔄 重新啟動 Agent", callback_data=f"sess_restart:{rst_token}"
+                        )
+                    ]
+                ]
+            )
+        await update.message.reply_text(
+            "⚠️ *當前 Session 已離線 / 進程結束*\n請點擊下方按鈕重新啟動，或發送 `/aoh_new` 建立新 Session。",
+            reply_markup=reply_markup,
+            parse_mode="Markdown",
+        )
         return
     lower_text = user_text.strip().lower()
     if lower_text in ("!esc", "!cancel", "esc", "cancel"):
         active_session.send_control_char("\x1b")
-        await update.message.reply_text(f"⏸️ 已發送 *ESC* 至 `{active_session.agent_name}`", parse_mode="Markdown")
+        await update.message.reply_text(
+            f"⏸️ 已發送 *ESC* 至 `{active_session.agent_name}`", parse_mode="Markdown"
+        )
         return
     elif lower_text in ("!ctrlc", "!stop", "ctrlc", "ctrl+c"):
         active_session.send_control_char("\x03")
-        await update.message.reply_text(f"🛑 已發送 *Ctrl+C* 至 `{active_session.agent_name}`", parse_mode="Markdown")
+        await update.message.reply_text(
+            f"🛑 已發送 *Ctrl+C* 至 `{active_session.agent_name}`", parse_mode="Markdown"
+        )
         return
     logger.info(
         f"[TG->AGENT] turn_id={_turn_id} user={user_id} session={active_session.session_id} "
-        f"driver={active_session.active_driver_name} text_len={len(user_text)} elapsed={(_time.monotonic()-_route_start):.3f}s"
+        f"driver={active_session.active_driver_name} text_len={len(user_text)} elapsed={(_time.monotonic() - _route_start):.3f}s"
     )
     active_session.send_input(user_text, turn_id=_turn_id)
     if (
@@ -167,4 +204,6 @@ async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE
         streamer.start()
         active_streamers[user_id] = streamer
     active_streamers[user_id].notify_user_input()
-    logger.info(f"[TG_ROUTE_DONE] turn_id={_turn_id} user={user_id} session={active_session.session_id} active_streamers={len(active_streamers)}")
+    logger.info(
+        f"[TG_ROUTE_DONE] turn_id={_turn_id} user={user_id} session={active_session.session_id} active_streamers={len(active_streamers)}"
+    )

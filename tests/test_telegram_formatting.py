@@ -10,6 +10,7 @@ Comprehensive tests for Telegram-Friendly Response Formatting:
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from telegram.error import BadRequest
 
@@ -55,10 +56,7 @@ def test_markdown_to_telegram_html_headers_and_quotes():
 
 def test_convert_table_to_bullets_2_columns():
     table_md = (
-        "| 層 | 實作 |\n"
-        "|---|---|\n"
-        "| 語言/環境 | Python 3.13 |\n"
-        "| 逐字稿 | yt-dlp + Whisper |\n"
+        "| 層 | 實作 |\n|---|---|\n| 語言/環境 | Python 3.13 |\n| 逐字稿 | yt-dlp + Whisper |\n"
     )
     res = markdown_to_telegram_html(table_md)
     assert "• <b>語言/環境</b>: Python 3.13" in res
@@ -82,7 +80,9 @@ def test_convert_table_to_bullets_multi_columns():
 def test_markdown_to_telegram_html_code_blocks():
     md = "```python\ndef hello():\n    return 'world'\n```"
     res = markdown_to_telegram_html(md)
-    assert '<pre><code class="language-python">def hello():\n    return \'world\'</code></pre>' in res
+    assert (
+        "<pre><code class=\"language-python\">def hello():\n    return 'world'</code></pre>" in res
+    )
 
     # Unclosed code block at stream end
     unclosed = "```python\ndef in_progress():"
@@ -95,10 +95,15 @@ def test_markdown_to_telegram_html_code_blocks():
     assert "| A | B |" in res_code_table
 
 
-
 def test_balance_telegram_html_tags():
-    assert balance_telegram_html_tags("<blockquote expandable><b>💭 思考中") == "<blockquote expandable><b>💭 思考中</b></blockquote>"
-    assert balance_telegram_html_tags("<pre><code class=\"language-py\">print(1)") == "<pre><code class=\"language-py\">print(1)</code></pre>"
+    assert (
+        balance_telegram_html_tags("<blockquote expandable><b>💭 思考中")
+        == "<blockquote expandable><b>💭 思考中</b></blockquote>"
+    )
+    assert (
+        balance_telegram_html_tags('<pre><code class="language-py">print(1)')
+        == '<pre><code class="language-py">print(1)</code></pre>'
+    )
     assert balance_telegram_html_tags("Normal text without tags") == "Normal text without tags"
     # Incomplete trailing tag
     assert balance_telegram_html_tags("Hello <pre") == "Hello"
@@ -108,13 +113,13 @@ def test_balance_telegram_html_tags():
 def test_split_html_into_chunks_preserves_tags():
     # Create an HTML text with a long code block inside that exceeds 3800 chars
     long_code = "print('hello')\n" * 300
-    html_input = f"<blockquote expandable><b>Header</b>\n<pre><code class=\"language-python\">{long_code}</code></pre></blockquote>"
+    html_input = f'<blockquote expandable><b>Header</b>\n<pre><code class="language-python">{long_code}</code></pre></blockquote>'
 
     chunks = split_html_into_chunks(html_input, max_chars=1000)
     assert len(chunks) > 1
 
     # Check each chunk is valid balanced HTML
-    for i, chunk in enumerate(chunks):
+    for _i, chunk in enumerate(chunks):
         assert chunk.startswith("<") or "print" in chunk
         # If chunk opens <pre>, it must close </pre>
         if "<pre" in chunk:
@@ -127,11 +132,7 @@ def test_format_hermes_html():
     res = format_hermes_html(
         text="Here is the solution:\n```python\nx = 10\n```",
         thought="Let me think carefully about this problem.",
-        tool_results=[{
-            "tool_name": "bash",
-            "preview": "pytest -q",
-            "content": "5 passed in 0.2s"
-        }],
+        tool_results=[{"tool_name": "bash", "preview": "pytest -q", "content": "5 passed in 0.2s"}],
         is_final=True,
         duration=2.45,
         agent_name="Claude Code",
@@ -150,10 +151,10 @@ def test_format_hermes_html():
 def test_incremental_ansi_cleaner():
     cleaner = IncrementalAnsiCleaner()
     # Feed first part of an escape sequence
-    c1 = cleaner.feed("Hello \x1B[3")
+    c1 = cleaner.feed("Hello \x1b[3")
     assert c1 == "Hello "
     # Feed remaining part of escape sequence
-    c2 = cleaner.feed("1mRed World\x1B[0m")
+    c2 = cleaner.feed("1mRed World\x1b[0m")
     assert c2 == "Red World"
     # Flush
     assert cleaner.flush() == ""
@@ -189,7 +190,11 @@ async def test_unified_streamer_html_and_final_actions():
 
     # Check bot was called with parse_mode='HTML'
     assert bot.send_message.called or bot.edit_message_text.called
-    call_args = bot.send_message.call_args_list[0] if bot.send_message.called else bot.edit_message_text.call_args_list[0]
+    call_args = (
+        bot.send_message.call_args_list[0]
+        if bot.send_message.called
+        else bot.edit_message_text.call_args_list[0]
+    )
     assert call_args.kwargs.get("parse_mode") == "HTML"
     text_sent = call_args.kwargs.get("text", "")
     assert "All tasks completed!" in text_sent
@@ -228,8 +233,8 @@ async def test_unified_streamer_html_badrequest_plain_fallback():
 
 @pytest.mark.asyncio
 async def test_session_action_retry_callback():
-    from agents_on_hand.ui.session_menu import session_action_callback_handler
     from agents_on_hand.session_manager import session_manager
+    from agents_on_hand.ui.session_menu import session_action_callback_handler
 
     # Mock session with last_user_prompt
     mock_session = MagicMock()
@@ -249,8 +254,10 @@ async def test_session_action_retry_callback():
     context = MagicMock()
     context.bot = MagicMock()
 
-    with patch.object(session_manager, "get_session", return_value=mock_session), \
-         patch("agents_on_hand.security.is_user_allowed", return_value=True):
+    with (
+        patch.object(session_manager, "get_session", return_value=mock_session),
+        patch("agents_on_hand.security.is_user_allowed", return_value=True),
+    ):
         await session_action_callback_handler(update, context)
 
     mock_session.send_input.assert_called_with("git status")
@@ -271,7 +278,9 @@ async def test_prime_agent_configuration_and_probing(tmp_path):
     assert prime_info["use_acp"] is True
 
     # Test discovery
-    with patch("shutil.which", side_effect=lambda x: "/usr/bin/prime-agent" if x == "prime-agent" else None):
+    with patch(
+        "shutil.which", side_effect=lambda x: "/usr/bin/prime-agent" if x == "prime-agent" else None
+    ):
         installed = get_installed_cli_agents(use_cache=False)
         assert "prime" in installed
 
@@ -292,7 +301,7 @@ async def test_prime_agent_configuration_and_probing(tmp_path):
 
 
 def test_anti_zombie_process_utils_and_shutdown(tmp_path):
-    from agents_on_hand.process_utils import kill_process_tree, is_process_alive
+    from agents_on_hand.process_utils import is_process_alive, kill_process_tree
     from agents_on_hand.session_manager import SessionManager
 
     # Test is_process_alive
@@ -333,5 +342,3 @@ def test_anti_zombie_process_utils_and_shutdown(tmp_path):
     assert cleaned == 1
     s1.stop.assert_called_once()
     assert not s2.stop.called
-
-

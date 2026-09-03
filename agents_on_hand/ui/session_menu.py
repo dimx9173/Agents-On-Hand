@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
@@ -9,6 +9,9 @@ from ..ansi_cleaner import format_telegram_code_block
 from ..runtime import active_streamers, bot_app, create_streamer_for_session
 from ..security import restricted
 from ..session_manager import session_manager
+
+if TYPE_CHECKING:
+    from ..session_manager import AgentSession
 
 logger = logging.getLogger("AgentsOnHand")
 
@@ -31,7 +34,9 @@ def _build_session_row(
     if is_active and s.is_running:
         row.append(InlineKeyboardButton("⏸️ 暫停", callback_data=f"sess:pause:{s.session_id}"))
     elif s.is_running:
-        row.append(InlineKeyboardButton(f"▶️ {short_id}", callback_data=f"sess:switch:{s.session_id}"))
+        row.append(
+            InlineKeyboardButton(f"▶️ {short_id}", callback_data=f"sess:switch:{s.session_id}")
+        )
         row.append(InlineKeyboardButton("🔄 重啟", callback_data=f"sess:restart:{s.session_id}"))
     else:
         row.append(InlineKeyboardButton("🔄 重啟", callback_data=f"sess:restart:{s.session_id}"))
@@ -47,7 +52,9 @@ async def sessions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     sessions = session_manager.list_user_sessions(user_id)
     active_session = session_manager.get_active_session(user_id)
     if not sessions:
-        await update.message.reply_text("ℹ️ 當前沒有任何 Session。請使用 `/aoh_new` 建立新 Session。", parse_mode="Markdown")
+        await update.message.reply_text(
+            "ℹ️ 當前沒有任何 Session。請使用 `/aoh_new` 建立新 Session。", parse_mode="Markdown"
+        )
         return
     text = "📋 *您的 CLI Agent Session 列表*:\n\n"
     keyboard = []
@@ -56,14 +63,20 @@ async def sessions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if not s.is_running:
             has_offline = True
         status_icon = "🟢" if s.is_running else "🔴"
-        is_active = (active_session and active_session.session_id == s.session_id)
+        is_active = active_session and active_session.session_id == s.session_id
         active_badge = " ⭐ (當前 Active)" if is_active else ""
         text += f"{status_icon} *ID*: `{s.session_id}` | *Agent*: {s.agent_name}{active_badge}\n"
         text += f"   📁 `{s.working_dir.name}`\n\n"
         row = _build_session_row(s, active_session, user_id)
         keyboard.append(row)
     if has_offline:
-        keyboard.append([InlineKeyboardButton("🧹 一鍵清理所有離線 Session", callback_data="sess:prune_offline")])
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    "🧹 一鍵清理所有離線 Session", callback_data="sess:prune_offline"
+                )
+            ]
+        )
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
 
@@ -73,13 +86,19 @@ async def prune_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user_id = update.effective_user.id
     count = session_manager.prune_offline_sessions(user_id)
     if count > 0:
-        await update.message.reply_text(f"🧹 已成功清理 {count} 個離線 Session！", parse_mode="Markdown")
+        await update.message.reply_text(
+            f"🧹 已成功清理 {count} 個離線 Session！", parse_mode="Markdown"
+        )
     else:
-        await update.message.reply_text("ℹ️ 目前沒有任何離線 Session 需要清理。", parse_mode="Markdown")
+        await update.message.reply_text(
+            "ℹ️ 目前沒有任何離線 Session 需要清理。", parse_mode="Markdown"
+        )
 
 
 @restricted
-async def session_action_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def session_action_callback_handler(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -107,16 +126,24 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
                     if not s.is_running:
                         has_offline = True
                     status_icon = "🟢" if s.is_running else "🔴"
-                    is_active = (active_session and active_session.session_id == s.session_id)
+                    is_active = active_session and active_session.session_id == s.session_id
                     active_badge = " ⭐ (當前 Active)" if is_active else ""
                     text += f"{status_icon} *ID*: `{s.session_id}` | *Agent*: {s.agent_name}{active_badge}\n"
                     text += f"   📁 `{s.working_dir.name}`\n\n"
                     row = _build_session_row(s, active_session, user_id)
                     keyboard.append(row)
                 if has_offline:
-                    keyboard.append([InlineKeyboardButton("🧹 一鍵清理所有離線 Session", callback_data="sess:prune_offline")])
+                    keyboard.append(
+                        [
+                            InlineKeyboardButton(
+                                "🧹 一鍵清理所有離線 Session", callback_data="sess:prune_offline"
+                            )
+                        ]
+                    )
                 reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.edit_message_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+                await query.edit_message_text(
+                    text, parse_mode="Markdown", reply_markup=reply_markup
+                )
         else:
             await query.answer("ℹ️ 目前沒有任何離線 Session 需要清理。", show_alert=True)
         return
@@ -127,12 +154,17 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
             await query.message.reply_text("❌ 該 Session 已不存在。")
             return
         prev_session = session_manager.get_active_session(user_id)
-        logger.info(f"[SESSION_SWITCH] user={user_id} from={getattr(prev_session, 'session_id', None)} to={session_id}")
+        logger.info(
+            f"[SESSION_SWITCH] user={user_id} from={getattr(prev_session, 'session_id', None)} to={session_id}"
+        )
         try:
-            (prev_session or session).trace.streamer_switch(getattr(prev_session, "session_id", None), session_id, reason="switch")
+            (prev_session or session).trace.streamer_switch(
+                getattr(prev_session, "session_id", None), session_id, reason="switch"
+            )
         except Exception:
             pass
         if prev_session and prev_session.session_id != session_id and prev_session.is_running:
+
             def _make_bg_done_cb(bg_sess_id: str, bg_agent_name: str, target_chat_id: int):
                 def _on_bg_done(s: Any) -> None:
                     if not bot_app:
@@ -142,14 +174,36 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
                     if not summary:
                         summary = "(無文字內容)"
                     alert_text = f"✅ *{bg_agent_name} 回覆完成*\n🆔 Session: `{bg_sess_id}`\n\n📝 *回覆摘要*:\n```\n{summary}\n```"
-                    reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton(f"🔄 切換回 {bg_agent_name}", callback_data=f"sess:switch:{bg_sess_id}")]])
+                    reply_markup = InlineKeyboardMarkup(
+                        [
+                            [
+                                InlineKeyboardButton(
+                                    f"🔄 切換回 {bg_agent_name}",
+                                    callback_data=f"sess:switch:{bg_sess_id}",
+                                )
+                            ]
+                        ]
+                    )
                     try:
                         loop = asyncio.get_running_loop()
-                        loop.create_task(bot_app.bot.send_message(chat_id=target_chat_id, text=alert_text, reply_markup=reply_markup, parse_mode="Markdown"))
+                        loop.create_task(
+                            bot_app.bot.send_message(
+                                chat_id=target_chat_id,
+                                text=alert_text,
+                                reply_markup=reply_markup,
+                                parse_mode="Markdown",
+                            )
+                        )
                     except Exception as e:
                         logger.warning(f"Could not send bg completion notification: {e}")
+
                 return _on_bg_done
-            prev_session.set_background_completion_callback(_make_bg_done_cb(prev_session.session_id, prev_session.agent_name, query.message.chat_id))
+
+            prev_session.set_background_completion_callback(
+                _make_bg_done_cb(
+                    prev_session.session_id, prev_session.agent_name, query.message.chat_id
+                )
+            )
         session.set_background_completion_callback(None)
         session_manager.set_active_session(user_id, session_id)
         if user_id in active_streamers:
@@ -158,7 +212,11 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
         logs = session.get_last_n_lines(n=100)
         formatted_code = format_telegram_code_block(logs, max_chars=3700)
         chat_id = query.message.chat_id
-        await context.bot.send_message(chat_id=chat_id, text=f"🔄 *已切換並對接至 Session: {session.agent_name}* (`{session_id}`)\n📁 `{session.working_dir}`\n\n📄 *歷史紀錄 (最後 100 行)*:\n{formatted_code}", parse_mode="Markdown")
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"🔄 *已切換並對接至 Session: {session.agent_name}* (`{session_id}`)\n📁 `{session.working_dir}`\n\n📄 *歷史紀錄 (最後 100 行)*:\n{formatted_code}",
+            parse_mode="Markdown",
+        )
         streamer = create_streamer_for_session(context.bot, chat_id, session)
         streamer.start()
         active_streamers[user_id] = streamer
@@ -168,13 +226,21 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
             return
         logs = session.get_last_n_lines(n=100)
         formatted_code = format_telegram_code_block(logs, max_chars=3700)
-        await query.message.reply_text(f"📄 *Session Log (最後 100 行)* - `{session_id}`:\n{formatted_code}", parse_mode="Markdown")
+        await query.message.reply_text(
+            f"📄 *Session Log (最後 100 行)* - `{session_id}`:\n{formatted_code}",
+            parse_mode="Markdown",
+        )
     elif action == "download":
         if not session or not session.log_file_path.exists():
             await query.message.reply_text("❌ Log 檔案不存在。")
             return
         with open(session.log_file_path, "rb") as f:
-            await context.bot.send_document(chat_id=query.message.chat_id, document=f, filename=f"{session.session_id}_{session.agent_key}.log", caption=f"📥 Log 檔案: {session.agent_name} ({session.session_id})")
+            await context.bot.send_document(
+                chat_id=query.message.chat_id,
+                document=f,
+                filename=f"{session.session_id}_{session.agent_key}.log",
+                caption=f"📥 Log 檔案: {session.agent_name} ({session.session_id})",
+            )
     elif action == "retry":
         if not session or not session.is_running:
             await query.message.reply_text("⚠️ 該 Session 已離線或不存在，無法重試。")
@@ -183,7 +249,9 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
         if not last_prompt:
             await query.message.reply_text("ℹ️ 目前沒有可重試的上一條 Prompt。")
             return
-        await query.message.reply_text(f"🔄 <b>重試上一條 Prompt</b>: <code>{last_prompt}</code>", parse_mode="HTML")
+        await query.message.reply_text(
+            f"🔄 <b>重試上一條 Prompt</b>: <code>{last_prompt}</code>", parse_mode="HTML"
+        )
         session.send_input(last_prompt)
         chat_id = query.message.chat_id
         if (
@@ -199,10 +267,14 @@ async def session_action_callback_handler(update: Update, context: ContextTypes.
         active_streamers[user_id].notify_user_input()
     elif action == "kill":
         if session_manager.kill_session(session_id):
-            if user_id in active_streamers and active_streamers[user_id].session.session_id == session_id:
+            if (
+                user_id in active_streamers
+                and active_streamers[user_id].session.session_id == session_id
+            ):
                 active_streamers[user_id].stop()
                 del active_streamers[user_id]
-            await query.edit_message_text(f"🛑 已成功結束 Session: `{session_id}`", parse_mode="Markdown")
+            await query.edit_message_text(
+                f"🛑 已成功結束 Session: `{session_id}`", parse_mode="Markdown"
+            )
         else:
             await query.message.reply_text("❌ 結束 Session 失敗或不存在。")
-

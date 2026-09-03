@@ -6,7 +6,6 @@ never targets recycled PIDs of dead processes, and never kills the parent group.
 
 import os
 import signal
-import pytest
 from unittest.mock import MagicMock, patch
 
 from agents_on_hand.process_utils import is_process_alive, kill_process_tree, set_pdeathsig_and_pgrp
@@ -82,9 +81,11 @@ def test_kill_process_tree_self_and_parent_group_protection():
     sibling_proc.returncode = None
     sibling_proc.poll.return_value = None
 
-    with patch("os.getpgid", return_value=current_pgid), \
-         patch("os.killpg") as mock_killpg, \
-         patch("os.kill") as mock_kill:
+    with (
+        patch("os.getpgid", return_value=current_pgid),
+        patch("os.killpg") as mock_killpg,
+        patch("os.kill") as mock_kill,
+    ):
         kill_process_tree(sibling_proc)
         # Should NEVER killpg our own group!
         mock_killpg.assert_not_called()
@@ -101,11 +102,14 @@ def test_kill_process_tree_system_pgid_protection():
     sys_proc.poll.return_value = None
 
     for bad_pgid in (0, 1, -1):
-        with patch("os.getpgid", return_value=bad_pgid), \
-             patch("os.killpg") as mock_killpg, \
-             patch("os.kill") as mock_kill:
+        with (
+            patch("os.getpgid", return_value=bad_pgid),
+            patch("os.killpg") as mock_killpg,
+            patch("os.kill") as mock_kill,
+        ):
             kill_process_tree(sys_proc)
             mock_killpg.assert_not_called()
+            mock_kill.assert_not_called()
 
 
 def test_kill_process_tree_dedicated_child_group_escalation():
@@ -117,9 +121,11 @@ def test_kill_process_tree_dedicated_child_group_escalation():
 
     dedicated_child_pgid = 77777  # Different from current_pgid
 
-    with patch("os.getpgid", return_value=dedicated_child_pgid), \
-         patch("os.getpgrp", return_value=1234), \
-         patch("os.killpg") as mock_killpg:
+    with (
+        patch("os.getpgid", return_value=dedicated_child_pgid),
+        patch("os.getpgrp", return_value=1234),
+        patch("os.killpg") as mock_killpg,
+    ):
         kill_process_tree(child_proc)
         mock_killpg.assert_any_call(dedicated_child_pgid, signal.SIGTERM)
         mock_killpg.assert_any_call(dedicated_child_pgid, signal.SIGKILL)

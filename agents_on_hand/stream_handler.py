@@ -15,7 +15,6 @@ from telegram.error import BadRequest
 from .ansi_cleaner import (
     escape_html,
     format_hermes_html,
-    format_hermes_style,
     split_html_into_chunks,
 )
 from .drivers.base_driver import DriverEvent
@@ -29,11 +28,11 @@ def split_text_into_chunks(text: str, max_chars: int = 3800) -> list[str]:
         return []
     chunks = []
     while len(text) > max_chars:
-        split_idx = text.rfind('\n', 0, max_chars)
+        split_idx = text.rfind("\n", 0, max_chars)
         if split_idx == -1:
             split_idx = max_chars
         chunks.append(text[:split_idx])
-        text = text[split_idx:].lstrip('\n')
+        text = text[split_idx:].lstrip("\n")
     if text:
         chunks.append(text)
     return chunks
@@ -41,8 +40,10 @@ def split_text_into_chunks(text: str, max_chars: int = 3800) -> list[str]:
 
 def _strip_html_tags(text: str) -> str:
     """Helper to strip HTML tags for plain-text fallback delivery."""
-    clean = re.sub(r'<[^>]+>', '', text)
-    return clean.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>').replace('&quot;', '"')
+    clean = re.sub(r"<[^>]+>", "", text)
+    return (
+        clean.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"')
+    )
 
 
 class UnifiedStreamer:
@@ -103,7 +104,9 @@ class UnifiedStreamer:
             self.session.trace.streamer_start(self.__class__.__name__)
         except Exception:
             pass
-        logger.info(f"[STREAMER_START] session={getattr(self.session, 'session_id', '?')} chat={self.chat_id}")
+        logger.info(
+            f"[STREAMER_START] session={getattr(self.session, 'session_id', '?')} chat={self.chat_id}"
+        )
         self.session.register_listener(self._on_driver_event)
 
     def stop(self):
@@ -113,7 +116,9 @@ class UnifiedStreamer:
             self.session.trace.streamer_stop(self.__class__.__name__)
         except Exception:
             pass
-        logger.info(f"[STREAMER_STOP] session={getattr(self.session, 'session_id', '?')} chat={self.chat_id} final_text={len(self.current_text)} thought={len(self.current_thought)}")
+        logger.info(
+            f"[STREAMER_STOP] session={getattr(self.session, 'session_id', '?')} chat={self.chat_id} final_text={len(self.current_text)} thought={len(self.current_thought)}"
+        )
         self._stop_typing()
         self._cancel_trailing_flush()
         self._cancel_wait_indicator()
@@ -159,7 +164,12 @@ class UnifiedStreamer:
         try:
             await asyncio.sleep(4.0)
             async with self._lock:
-                if not self.current_text and not self.current_thought and self._is_active and not self.msg_ids:
+                if (
+                    not self.current_text
+                    and not self.current_thought
+                    and self._is_active
+                    and not self.msg_ids
+                ):
                     waiting_msg = "⏳ <b>Agent 正在思考與處理中，請稍候...</b>"
                     first_id = await self._deliver(waiting_msg, None)
                     if first_id:
@@ -194,7 +204,9 @@ class UnifiedStreamer:
         self._cancel_wait_indicator()
         if isinstance(event, str):
             self.current_text += event
-            logger.info(f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=TEXT_RAW +{len(event)} chars total={len(self.current_text)}")
+            logger.info(
+                f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=TEXT_RAW +{len(event)} chars total={len(self.current_text)}"
+            )
             asyncio.create_task(self._schedule_edit())
             return
 
@@ -202,32 +214,44 @@ class UnifiedStreamer:
 
         if e_type == DriverEvent.TEXT_DELTA:
             self.current_text += event.content
-            logger.debug(f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=TEXT_DELTA +{len(event.content)} chars total={len(self.current_text)}")
+            logger.debug(
+                f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=TEXT_DELTA +{len(event.content)} chars total={len(self.current_text)}"
+            )
             asyncio.create_task(self._schedule_edit())
 
         elif e_type == DriverEvent.THOUGHT_DELTA:
             self.current_thought += event.content
-            logger.debug(f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=THOUGHT_DELTA +{len(event.content)} chars total={len(self.current_thought)}")
+            logger.debug(
+                f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=THOUGHT_DELTA +{len(event.content)} chars total={len(self.current_thought)}"
+            )
             asyncio.create_task(self._schedule_edit())
 
         elif e_type == DriverEvent.TOOL_REQUEST:
-            logger.info(f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=TOOL_REQUEST req_id={event.request_id} tool={event.tool_name}")
+            logger.info(
+                f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=TOOL_REQUEST req_id={event.request_id} tool={event.tool_name}"
+            )
             self._on_tool_request(event.request_id, event.tool_name, event.tool_args)
 
         elif e_type == DriverEvent.TOOL_RESULT:
             self._tool_count += 1
             content_str = str(event.content).strip()
             preview = (content_str[:80] + "...") if len(content_str) > 80 else content_str
-            self.tool_results.append({
-                "tool_name": event.tool_name,
-                "content": content_str,
-                "preview": preview,
-            })
-            logger.info(f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=TOOL_RESULT tool={event.tool_name} chars={len(content_str)}")
+            self.tool_results.append(
+                {
+                    "tool_name": event.tool_name,
+                    "content": content_str,
+                    "preview": preview,
+                }
+            )
+            logger.info(
+                f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=TOOL_RESULT tool={event.tool_name} chars={len(content_str)}"
+            )
             asyncio.create_task(self._schedule_edit())
 
         elif e_type in (DriverEvent.TURN_END, DriverEvent.EXIT):
-            logger.info(f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type={e_type} is_final=True text={len(self.current_text)} thought={len(self.current_thought)} tools={self._tool_count}")
+            logger.info(
+                f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type={e_type} is_final=True text={len(self.current_text)} thought={len(self.current_thought)} tools={self._tool_count}"
+            )
             self._is_turn_final = True
             self._stop_typing()
             asyncio.create_task(self._schedule_edit())
@@ -247,12 +271,20 @@ class UnifiedStreamer:
 
         text = f"🛡️ <b>Tool 執行審核請求</b>\nAgent 要求執行以下工具：\n{detail_str}\n\n請選擇是否授權："
 
-        reply_markup = InlineKeyboardMarkup([
+        reply_markup = InlineKeyboardMarkup(
             [
-                InlineKeyboardButton("✅ 同意執行", callback_data=f"acp_perm:approve:{self.session.session_id}:{req_id}"),
-                InlineKeyboardButton("❌ 拒絕執行", callback_data=f"acp_perm:reject:{self.session.session_id}:{req_id}"),
+                [
+                    InlineKeyboardButton(
+                        "✅ 同意執行",
+                        callback_data=f"acp_perm:approve:{self.session.session_id}:{req_id}",
+                    ),
+                    InlineKeyboardButton(
+                        "❌ 拒絕執行",
+                        callback_data=f"acp_perm:reject:{self.session.session_id}:{req_id}",
+                    ),
+                ]
             ]
-        ])
+        )
 
         async def _safe_send_tool_req():
             try:
@@ -288,9 +320,7 @@ class UnifiedStreamer:
             remaining = self.edit_interval - (now - self._last_edit_time)
             if remaining > 0:
                 if self._trailing_flush_task is None or self._trailing_flush_task.done():
-                    self._trailing_flush_task = asyncio.create_task(
-                        self._trailing_flush(remaining)
-                    )
+                    self._trailing_flush_task = asyncio.create_task(self._trailing_flush(remaining))
                 return
 
             await self._flush_edit_locked()
@@ -326,14 +356,18 @@ class UnifiedStreamer:
             tool_count=self._tool_count,
         )
 
-    async def _deliver_single(self, formatted: str, msg_id: int | None, reply_markup: Any = None) -> int | None:
+    async def _deliver_single(
+        self, formatted: str, msg_id: int | None, reply_markup: Any = None
+    ) -> int | None:
         """Send or edit a single Telegram message with HTML & Plaintext fallback.
 
         Returns the message_id of the streaming message, or None on failure.
         """
         is_edit = msg_id is not None
         action = "edit" if is_edit else "send"
-        logger.info(f"[TG_DELIVER] chat={self.chat_id} action={action} msg_id={msg_id} chars={len(formatted)} is_final={self._is_turn_final}")
+        logger.info(
+            f"[TG_DELIVER] chat={self.chat_id} action={action} msg_id={msg_id} chars={len(formatted)} is_final={self._is_turn_final}"
+        )
         kwargs: dict[str, Any] = {"parse_mode": "HTML"}
         if reply_markup is not None:
             kwargs["reply_markup"] = reply_markup
@@ -345,14 +379,20 @@ class UnifiedStreamer:
                     text=formatted,
                     **kwargs,
                 )
-                logger.info(f"[TG_DELIVER_OK] chat={self.chat_id} action=send new_msg_id={msg.message_id} chars={len(formatted)}")
+                logger.info(
+                    f"[TG_DELIVER_OK] chat={self.chat_id} action=send new_msg_id={msg.message_id} chars={len(formatted)}"
+                )
                 try:
-                    self.session.trace.tg_deliver(msg.message_id, len(formatted), is_edit=False, is_final=self._is_turn_final)
+                    self.session.trace.tg_deliver(
+                        msg.message_id, len(formatted), is_edit=False, is_final=self._is_turn_final
+                    )
                 except Exception:
                     pass
                 return msg.message_id
             except BadRequest as e:
-                logger.warning(f"[TG_DELIVER_HTML_FAIL] chat={self.chat_id} action=send err={e} retry_plain=True")
+                logger.warning(
+                    f"[TG_DELIVER_HTML_FAIL] chat={self.chat_id} action=send err={e} retry_plain=True"
+                )
                 plain_text = _strip_html_tags(formatted)
                 try:
                     plain_kwargs = {"reply_markup": reply_markup} if reply_markup else {}
@@ -376,7 +416,9 @@ class UnifiedStreamer:
                 **kwargs,
             )
             try:
-                self.session.trace.tg_deliver(msg_id, len(formatted), is_edit=True, is_final=self._is_turn_final)
+                self.session.trace.tg_deliver(
+                    msg_id, len(formatted), is_edit=True, is_final=self._is_turn_final
+                )
             except Exception:
                 pass
             return msg_id
@@ -384,7 +426,9 @@ class UnifiedStreamer:
             err_str = str(e).lower()
             if "not modified" in err_str:
                 return msg_id
-            logger.warning(f"[TG_DELIVER_HTML_FAIL] chat={self.chat_id} msg_id={msg_id} err={e} retry_plain=True")
+            logger.warning(
+                f"[TG_DELIVER_HTML_FAIL] chat={self.chat_id} msg_id={msg_id} err={e} retry_plain=True"
+            )
             plain_text = _strip_html_tags(formatted)
             try:
                 plain_kwargs = {"reply_markup": reply_markup} if reply_markup else {}
@@ -428,7 +472,9 @@ class UnifiedStreamer:
         except RuntimeError:
             self._last_edit_time = 0.0
 
-        formatted = self._render_content(self.current_text, self.current_thought, is_final=self._is_turn_final)
+        formatted = self._render_content(
+            self.current_text, self.current_thought, is_final=self._is_turn_final
+        )
         if not formatted.strip():
             return
 
@@ -438,20 +484,28 @@ class UnifiedStreamer:
 
         action_markup = None
         if self._is_turn_final:
-            action_markup = InlineKeyboardMarkup([
+            action_markup = InlineKeyboardMarkup(
                 [
-                    InlineKeyboardButton("🔄 重試此輪", callback_data=f"sess:retry:{self.session.session_id}"),
-                    InlineKeyboardButton("🛑 結束 Session", callback_data=f"sess:kill:{self.session.session_id}"),
+                    [
+                        InlineKeyboardButton(
+                            "🔄 重試此輪", callback_data=f"sess:retry:{self.session.session_id}"
+                        ),
+                        InlineKeyboardButton(
+                            "🛑 結束 Session", callback_data=f"sess:kill:{self.session.session_id}"
+                        ),
+                    ]
                 ]
-            ])
+            )
 
         for i, chunk in enumerate(chunks):
-            is_last = (i == len(chunks) - 1)
+            is_last = i == len(chunks) - 1
             chunk_markup = action_markup if (is_last and self._is_turn_final) else None
 
             if i < len(self.msg_ids):
                 target_id = self.msg_ids[i]
-                delivered_id = await self._deliver_single(chunk, target_id, reply_markup=chunk_markup)
+                delivered_id = await self._deliver_single(
+                    chunk, target_id, reply_markup=chunk_markup
+                )
                 if delivered_id and delivered_id != target_id:
                     self.msg_ids[i] = delivered_id
             else:
@@ -462,4 +516,3 @@ class UnifiedStreamer:
 
 # Compatibility Alias for bot.py and tests
 DirectChatStreamer = UnifiedStreamer
-

@@ -6,6 +6,7 @@ def _reload_config(monkeypatch, raw_ids, dev_allow="0"):
     monkeypatch.setenv("ALLOWED_TELEGRAM_USER_IDS", raw_ids)
     monkeypatch.setenv("AOH_DEV_ALLOW_ALL_USERS", dev_allow)
     import agents_on_hand.config as cfg
+
     importlib.reload(cfg)
     return cfg
 
@@ -32,6 +33,7 @@ def test_path_blank_denies(monkeypatch):
     _reload_config(monkeypatch, "123")
     monkeypatch.setenv("ALLOWED_ROOT_DIRS", "")
     import agents_on_hand.config as cfg2
+
     importlib.reload(cfg2)
     assert cfg2.is_path_allowed(pathlib.Path("/tmp")) is False
 

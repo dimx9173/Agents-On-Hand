@@ -3,22 +3,20 @@ import re
 from typing import Any
 
 # Regex pattern matching ANSI escape codes (colors, cursor movements, erase lines, etc.)
-ANSI_ESCAPE_PATTERN = re.compile(
-    r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'
-)
+ANSI_ESCAPE_PATTERN = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 
 def strip_ansi_codes(text: str) -> str:
     """Strip all ANSI control and escape sequences from text."""
     if not text:
         return ""
-    clean_text = ANSI_ESCAPE_PATTERN.sub('', text)
+    clean_text = ANSI_ESCAPE_PATTERN.sub("", text)
 
-    raw_lines = clean_text.split('\n')
+    raw_lines = clean_text.split("\n")
     processed_lines = []
     for line in raw_lines:
-        if '\r' in line:
-            parts = line.split('\r')
+        if "\r" in line:
+            parts = line.split("\r")
             non_empty_parts = [p for p in parts if p]
             line = non_empty_parts[-1] if non_empty_parts else ""
         processed_lines.append(line)
@@ -45,7 +43,7 @@ class IncrementalAnsiCleaner:
 
         # Check if text ends with an incomplete escape sequence
         # Match \\x1b followed by incomplete CSI or escape sequence
-        trailing_esc = re.search(r'\x1B(?:\[[0-?]*[ -/]*|\([A-Z0-9]?|\][^\x07\x1b]*)$', combined)
+        trailing_esc = re.search(r"\x1B(?:\[[0-?]*[ -/]*|\([A-Z0-9]?|\][^\x07\x1b]*)$", combined)
         if trailing_esc:
             split_point = trailing_esc.start()
             self._buffer = combined[split_point:]
@@ -74,15 +72,32 @@ def clean_cli_output(raw_text: str) -> str:
 
     # Keywords for static TUI banners in omp / claude / prime / interactive tools
     tui_banner_keywords = [
-        "omp v", "Claude Code", "Prime Agent", "prime-agent", "Welcome back!", "for prompt actions",
-        "for commands", "to run bash", "to run python", "LSP Servers",
-        "No LSP servers", "Recent sessions", "Ctrl+D can be used to exit",
-        "ctrl+r to search", "Executable not found in $PATH", "Connected: ",
-        "connecting: ", "Failed: ", "MiniMax-M3", "Session accent",
-        "Theme used when", "Tight Layout", "Closing session"
+        "omp v",
+        "Claude Code",
+        "Prime Agent",
+        "prime-agent",
+        "Welcome back!",
+        "for prompt actions",
+        "for commands",
+        "to run bash",
+        "to run python",
+        "LSP Servers",
+        "No LSP servers",
+        "Recent sessions",
+        "Ctrl+D can be used to exit",
+        "ctrl+r to search",
+        "Executable not found in $PATH",
+        "Connected: ",
+        "connecting: ",
+        "Failed: ",
+        "MiniMax-M3",
+        "Session accent",
+        "Theme used when",
+        "Tight Layout",
+        "Closing session",
     ]
 
-    box_char_pattern = re.compile(r'[\u2500-\u257F\u2580-\u259F╭╰│─┌┐└┘├┤┼╯┬┴\s]+')
+    box_char_pattern = re.compile(r"[\u2500-\u257F\u2580-\u259F╭╰│─┌┐└┘├┤┼╯┬┴\s]+")
 
     filtered_lines = []
     for line in clean.splitlines():
@@ -91,7 +106,7 @@ def clean_cli_output(raw_text: str) -> str:
             continue
 
         # Skip pure TUI box drawing lines
-        stripped_box = box_char_pattern.sub('', line_str)
+        stripped_box = box_char_pattern.sub("", line_str)
         if not stripped_box:
             continue
 
@@ -100,18 +115,24 @@ def clean_cli_output(raw_text: str) -> str:
             continue
 
         # Skip raw internal JSON hook dumps or transcript diagnostics
-        if (line_str.startswith('{"session_id":') and ("hook_event_name" in line_str or "transcript_path" in line_str)) or line_str.startswith("[{'type': 'content'"):
+        if (
+            line_str.startswith('{"session_id":')
+            and ("hook_event_name" in line_str or "transcript_path" in line_str)
+        ) or line_str.startswith("[{'type': 'content'"):
             continue
 
         # Strip TUI side borders from active lines (e.g. │  hello  │ -> hello)
-        cleaned_line = re.sub(r'^[\u2500-\u257F\u2580-\u259F╭╰│─┌┐└┘├┤┼╯┬┴╘╒╓╫╪█▀▄▌▐╟╢┼\s]+|[\u2500-\u257F\u2580-\u259F╭╰│─┌┐└┘├┤┼╯┬┴╘╒╓╫╪█▀▄▌▐╟╢┼\s]+$', '', line_str).strip()
+        cleaned_line = re.sub(
+            r"^[\u2500-\u257F\u2580-\u259F╭╰│─┌┐└┘├┤┼╯┬┴╘╒╓╫╪█▀▄▌▐╟╢┼\s]+|[\u2500-\u257F\u2580-\u259F╭╰│─┌┐└┘├┤┼╯┬┴╘╒╓╫╪█▀▄▌▐╟╢┼\s]+$",
+            "",
+            line_str,
+        ).strip()
         if cleaned_line:
             # Deduplicate consecutive identical lines from terminal redraws
             if not filtered_lines or cleaned_line != filtered_lines[-1]:
                 filtered_lines.append(cleaned_line)
 
     return "\n".join(filtered_lines)
-
 
 
 def escape_html(text: str) -> str:
@@ -121,28 +142,26 @@ def escape_html(text: str) -> str:
     return html.escape(text, quote=False)
 
 
-TABLE_SEPARATOR_PATTERN = re.compile(
-    r'^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$'
-)
+TABLE_SEPARATOR_PATTERN = re.compile(r"^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$")
 
 
 def split_markdown_table_row(row_str: str) -> list[str]:
     """Split a markdown table row by pipe '|' into stripped cell strings."""
     stripped = row_str.strip()
-    if stripped.startswith('|'):
+    if stripped.startswith("|"):
         stripped = stripped[1:]
-    if stripped.endswith('|'):
+    if stripped.endswith("|"):
         stripped = stripped[:-1]
-    cells = [c.strip() for c in re.split(r'(?<!\\)\|', stripped)]
+    cells = [c.strip() for c in re.split(r"(?<!\\)\|", stripped)]
     return cells
 
 
 def is_table_row(line: str) -> bool:
     """Return True if line is a valid markdown table row."""
     stripped = line.strip()
-    if not stripped or stripped.startswith('```'):
+    if not stripped or stripped.startswith("```"):
         return False
-    return '|' in stripped
+    return "|" in stripped
 
 
 def _render_table_block(table_block: list[str]) -> str:
@@ -188,7 +207,7 @@ def _render_table_block(table_block: list[str]) -> str:
             continue
         heading = row[0] if row[0] else f"項目 {idx}"
         sub_bullets = []
-        for h, v in zip(headers[1:], row[1:]):
+        for h, v in zip(headers[1:], row[1:], strict=False):
             if v:
                 sub_bullets.append(f"  • {h}: {v}")
         if sub_bullets:
@@ -205,10 +224,10 @@ def convert_table_to_bullets(text: str) -> str:
     Rewrites GFM pipe tables into mobile-friendly cards/bullets.
     Code blocks (```...```) are preserved without modification.
     """
-    if not text or '|' not in text or '-' not in text:
+    if not text or "|" not in text or "-" not in text:
         return text
 
-    lines = text.split('\n')
+    lines = text.split("\n")
     out: list[str] = []
     in_fence = False
     i = 0
@@ -217,7 +236,7 @@ def convert_table_to_bullets(text: str) -> str:
         line = lines[i]
         stripped = line.strip()
 
-        if stripped.startswith('```'):
+        if stripped.startswith("```"):
             in_fence = not in_fence
             out.append(line)
             i += 1
@@ -228,14 +247,14 @@ def convert_table_to_bullets(text: str) -> str:
             i += 1
             continue
 
-        if (
-            '|' in line
-            and i + 1 < len(lines)
-            and TABLE_SEPARATOR_PATTERN.match(lines[i + 1])
-        ):
+        if "|" in line and i + 1 < len(lines) and TABLE_SEPARATOR_PATTERN.match(lines[i + 1]):
             table_block = [line, lines[i + 1]]
             j = i + 2
-            while j < len(lines) and is_table_row(lines[j]) and not TABLE_SEPARATOR_PATTERN.match(lines[j]):
+            while (
+                j < len(lines)
+                and is_table_row(lines[j])
+                and not TABLE_SEPARATOR_PATTERN.match(lines[j])
+            ):
                 table_block.append(lines[j])
                 j += 1
             out.append(_render_table_block(table_block))
@@ -245,7 +264,7 @@ def convert_table_to_bullets(text: str) -> str:
         out.append(line)
         i += 1
 
-    return '\n'.join(out)
+    return "\n".join(out)
 
 
 def markdown_to_telegram_html(md_text: str) -> str:
@@ -286,9 +305,11 @@ def markdown_to_telegram_html(md_text: str) -> str:
                 in_code_block = False
                 escaped_code = escape_html("\n".join(code_block_lines))
                 if code_block_lang:
-                    html_lines.append(f'<pre><code class="language-{escape_html(code_block_lang)}">{escaped_code}</code></pre>')
+                    html_lines.append(
+                        f'<pre><code class="language-{escape_html(code_block_lang)}">{escaped_code}</code></pre>'
+                    )
                 else:
-                    html_lines.append(f'<pre><code>{escaped_code}</code></pre>')
+                    html_lines.append(f"<pre><code>{escaped_code}</code></pre>")
                 code_block_lines = []
                 code_block_lang = ""
             continue
@@ -298,12 +319,12 @@ def markdown_to_telegram_html(md_text: str) -> str:
             continue
 
         # Header check: # Header -> 📌 <b>Header</b>, ## Header -> 🔹 <b>Header</b>, ### Header -> ▪️ <b>Header</b>
-        header_match = re.match(r'^(#{1,6})\s+(.+)$', line)
+        header_match = re.match(r"^(#{1,6})\s+(.+)$", line)
         if header_match:
             level = len(header_match.group(1))
             header_text = header_match.group(2).strip()
             # Strip redundant outer bold markers in header
-            header_text = re.sub(r'^\*\*(.+?)\*\*$', r'\1', header_text)
+            header_text = re.sub(r"^\*\*(.+?)\*\*$", r"\1", header_text)
             prefix = "📌 " if level == 1 else ("🔹 " if level == 2 else "▪️ ")
             html_lines.append(f"{prefix}<b>{_format_inline_markdown(header_text)}</b>")
             continue
@@ -315,7 +336,7 @@ def markdown_to_telegram_html(md_text: str) -> str:
             continue
 
         # Unordered list: - item or * item -> • item
-        list_match = re.match(r'^(\s*)[-*+]\s+(.+)$', line)
+        list_match = re.match(r"^(\s*)[-*+]\s+(.+)$", line)
         if list_match:
             indent = list_match.group(1)
             item_text = list_match.group(2)
@@ -328,12 +349,13 @@ def markdown_to_telegram_html(md_text: str) -> str:
     if in_code_block:
         escaped_code = escape_html("\n".join(code_block_lines))
         if code_block_lang:
-            html_lines.append(f'<pre><code class="language-{escape_html(code_block_lang)}">{escaped_code}</code></pre>')
+            html_lines.append(
+                f'<pre><code class="language-{escape_html(code_block_lang)}">{escaped_code}</code></pre>'
+            )
         else:
-            html_lines.append(f'<pre><code>{escaped_code}</code></pre>')
+            html_lines.append(f"<pre><code>{escaped_code}</code></pre>")
 
     return "\n".join(html_lines)
-
 
 
 def _format_inline_markdown(text: str) -> str:
@@ -343,11 +365,11 @@ def _format_inline_markdown(text: str) -> str:
 
     # Split text into inline code segments and non-code segments
     # Pattern to match inline code: `code`
-    parts = re.split(r'(`[^`\n]+`)', text)
+    parts = re.split(r"(`[^`\n]+`)", text)
     formatted_parts = []
 
     for part in parts:
-        if part.startswith('`') and part.endswith('`') and len(part) >= 2:
+        if part.startswith("`") and part.endswith("`") and len(part) >= 2:
             code_content = part[1:-1]
             formatted_parts.append(f"<code>{escape_html(code_content)}</code>")
         else:
@@ -356,22 +378,20 @@ def _format_inline_markdown(text: str) -> str:
 
             # Markdown links: [text](url) -> <a href="url">text</a>
             escaped = re.sub(
-                r'\[([^\]]+)\]\((https?://[^\s\)]+)\)',
-                r'<a href="\2">\1</a>',
-                escaped
+                r"\[([^\]]+)\]\((https?://[^\s\)]+)\)", r'<a href="\2">\1</a>', escaped
             )
 
             # Bold: **text** or __text__ -> <b>text</b>
-            escaped = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', escaped)
-            escaped = re.sub(r'__(.+?)__', r'<b>\1</b>', escaped)
+            escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
+            escaped = re.sub(r"__(.+?)__", r"<b>\1</b>", escaped)
 
             # Strikethrough: ~~text~~ or ~text~ -> <s>text</s>
-            escaped = re.sub(r'~~(.+?)~~', r'<s>\1</s>', escaped)
-            escaped = re.sub(r'~([^~\s]+?)~', r'<s>\1</s>', escaped)
+            escaped = re.sub(r"~~(.+?)~~", r"<s>\1</s>", escaped)
+            escaped = re.sub(r"~([^~\s]+?)~", r"<s>\1</s>", escaped)
 
             # Italic: *text* or _text_ (excluding inside words like file_name_test)
-            escaped = re.sub(r'(?<!\w)\*([^*\n]+?)\*(?!\w)', r'<i>\1</i>', escaped)
-            escaped = re.sub(r'(?<!\w)_([^_\n]+?)_(?!\w)', r'<i>\1</i>', escaped)
+            escaped = re.sub(r"(?<!\w)\*([^*\n]+?)\*(?!\w)", r"<i>\1</i>", escaped)
+            escaped = re.sub(r"(?<!\w)_([^_\n]+?)_(?!\w)", r"<i>\1</i>", escaped)
 
             formatted_parts.append(escaped)
 
@@ -387,11 +407,11 @@ def balance_telegram_html_tags(html_text: str) -> str:
         return ""
 
     # Remove incomplete trailing tag at the very end of stream (e.g. "<pre" or "<b" or "&am")
-    cleaned = re.sub(r'\s*<[a-zA-Z0-9_\-\s="]*$', '', html_text)
-    cleaned = re.sub(r'\s*&[a-zA-Z0-9#]*$', '', cleaned)
+    cleaned = re.sub(r'\s*<[a-zA-Z0-9_\-\s="]*$', "", html_text)
+    cleaned = re.sub(r"\s*&[a-zA-Z0-9#]*$", "", cleaned)
 
     # Find all opening and closing tags
-    tag_pattern = re.compile(r'<(/)?([a-zA-Z0-9_\-]+)(?:\s+[^>]*)?>')
+    tag_pattern = re.compile(r"<(/)?([a-zA-Z0-9_\-]+)(?:\s+[^>]*)?>")
     open_stack = []
 
     for match in tag_pattern.finditer(cleaned):
@@ -429,23 +449,23 @@ def split_html_into_chunks(html_text: str, max_chars: int = 3800) -> list[str]:
 
     chunks = []
     remaining = html_text
-    tag_regex = re.compile(r'<(/)?([a-zA-Z0-9_\-]+)(\s+[^>]*)?>')
+    tag_regex = re.compile(r"<(/)?([a-zA-Z0-9_\-]+)(\s+[^>]*)?>")
 
     while len(remaining) > max_chars:
         # Search for safe split point before max_chars
         # Priority: newline after paragraph > any newline > tag boundary > max_chars
-        split_idx = remaining.rfind('\n\n', 0, max_chars)
+        split_idx = remaining.rfind("\n\n", 0, max_chars)
         if split_idx == -1 or split_idx < max_chars // 2:
-            split_idx = remaining.rfind('\n', 0, max_chars)
+            split_idx = remaining.rfind("\n", 0, max_chars)
         if split_idx == -1 or split_idx < max_chars // 2:
-            split_idx = remaining.rfind('>', 0, max_chars)
+            split_idx = remaining.rfind(">", 0, max_chars)
             if split_idx != -1:
                 split_idx += 1  # include closing '>'
         if split_idx == -1 or split_idx <= 0:
             split_idx = max_chars
 
         head = remaining[:split_idx]
-        tail = remaining[split_idx:].lstrip('\n')
+        tail = remaining[split_idx:].lstrip("\n")
 
         # Analyze active open tags up to split_idx
         open_tags_with_attrs: list[str] = []
@@ -514,7 +534,9 @@ def format_hermes_html(
         else:
             escaped_thought = escape_html(clean_thought.strip())
             header_title = "💭 思考過程" if is_final else "💭 思考中..."
-            thought_html = f"<blockquote expandable><b>{header_title}</b>\n{escaped_thought}</blockquote>"
+            thought_html = (
+                f"<blockquote expandable><b>{header_title}</b>\n{escaped_thought}</blockquote>"
+            )
         sections.append(thought_html)
 
     # 2. Tool Executions & Results (if any)
@@ -531,7 +553,9 @@ def format_hermes_html(
                     + f"\n<pre><code>{content}</code></pre></blockquote>"
                 )
             else:
-                tool_html = f"🛠️ <b>Tool ({name})</b>" + (f": <code>{preview}</code>" if preview else "")
+                tool_html = f"🛠️ <b>Tool ({name})</b>" + (
+                    f": <code>{preview}</code>" if preview else ""
+                )
 
             sections.append(tool_html)
 
@@ -587,7 +611,11 @@ def format_hermes_style(text: str) -> str:
             continue
 
         # Tool execution pattern (e.g. bash: git status, edit: auth.py, read: config.json)
-        tool_match = re.match(r'^(?:running\s+tool|executing\s+tool|tool|bash|edit|read|grep|write|glob|python)\s*[:>]\s*(.+)$', line_str, re.IGNORECASE)
+        tool_match = re.match(
+            r"^(?:running\s+tool|executing\s+tool|tool|bash|edit|read|grep|write|glob|python)\s*[:>]\s*(.+)$",
+            line_str,
+            re.IGNORECASE,
+        )
         if tool_match:
             tool_detail = tool_match.group(1).strip()
             formatted_lines.append(f"🛠️ *Tool*: `{tool_detail}`")
@@ -611,10 +639,9 @@ def format_telegram_code_block(text: str, max_chars: int = 3800, lang: str = "")
 
     if len(clean) > max_chars:
         trimmed_notice = "... [Log truncated - Showing last output] ...\n"
-        clean = trimmed_notice + clean[-(max_chars - len(trimmed_notice)):]
+        clean = trimmed_notice + clean[-(max_chars - len(trimmed_notice)) :]
 
     if not clean.strip():
         clean = "(No output yet...)"
 
     return f"```{lang}\n{clean}\n```"
-

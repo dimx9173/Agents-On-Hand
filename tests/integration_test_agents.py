@@ -39,7 +39,12 @@ class MockTelegramBot:
 
     async def send_message(self, chat_id, text, parse_mode=None, reply_markup=None):
         self.next_msg_id += 1
-        record = {"action": "send", "text": text, "msg_id": self.next_msg_id, "parse_mode": parse_mode}
+        record = {
+            "action": "send",
+            "text": text,
+            "msg_id": self.next_msg_id,
+            "parse_mode": parse_mode,
+        }
         self.sent_messages.append(record)
         msg = type("Message", (), {"message_id": self.next_msg_id})()
         return msg
@@ -69,9 +74,9 @@ class MockAgentSession:
 
 
 async def test_agent(name: str, driver):
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"🧪 Sequential Integration Test: {name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     text_chunks = []
     thought_chunks = []
@@ -81,7 +86,10 @@ async def test_agent(name: str, driver):
 
     def on_event(event: DriverEvent):
         nonlocal first_token_time
-        if event.event_type in (DriverEvent.TEXT_DELTA, DriverEvent.THOUGHT_DELTA) and event.content:
+        if (
+            event.event_type in (DriverEvent.TEXT_DELTA, DriverEvent.THOUGHT_DELTA)
+            and event.content
+        ):
             if first_token_time is None:
                 first_token_time = asyncio.get_event_loop().time()
 
@@ -151,9 +159,13 @@ async def test_agent(name: str, driver):
     ttft1 = (first_token_time - start_time1) if first_token_time is not None else None
 
     # Get exact message payload ready for Telegram
-    tg_payload1 = mock_bot.sent_messages[-1]["text"] if mock_bot.sent_messages else streamer._render_content(turn1_text, turn1_thought)
+    tg_payload1 = (
+        mock_bot.sent_messages[-1]["text"]
+        if mock_bot.sent_messages
+        else streamer._render_content(turn1_text, turn1_thought)
+    )
 
-    print(f"\n\n  {'─'*50}")
+    print(f"\n\n  {'─' * 50}")
     print(f"  📊 TURN 1 RESULT SUMMARY for {name}:")
     print(f"  Text response: {len(turn1_text)} chars")
     if ttft1 is not None:
@@ -210,9 +222,13 @@ async def test_agent(name: str, driver):
     ttft2 = (first_token_time - start_time2) if first_token_time is not None else None
 
     # Get exact message payload ready for Telegram
-    tg_payload2 = mock_bot.sent_messages[-1]["text"] if mock_bot.sent_messages else streamer._render_content(turn2_text, turn2_thought)
+    tg_payload2 = (
+        mock_bot.sent_messages[-1]["text"]
+        if mock_bot.sent_messages
+        else streamer._render_content(turn2_text, turn2_thought)
+    )
 
-    print(f"\n\n  {'─'*50}")
+    print(f"\n\n  {'─' * 50}")
     print(f"  📊 TURN 2 RESULT SUMMARY for {name}:")
     print(f"  Text response: {len(turn2_text)} chars")
     if ttft2 is not None:
@@ -231,10 +247,14 @@ async def test_agent(name: str, driver):
     # Strict Validation: Verify TG Pre-Send payload contains working directory keyword
     expected_kw = "agents-on-hand"
     if expected_kw in tg_payload2.lower():
-        print(f"  ✅ PASS — TG Pre-Send Payload & Project Path Validation OK (Found '{expected_kw}')!")
+        print(
+            f"  ✅ PASS — TG Pre-Send Payload & Project Path Validation OK (Found '{expected_kw}')!"
+        )
         result = True
     else:
-        print(f"  ❌ FAIL — TG Pre-Send Payload Validation Failed! Payload does not contain '{expected_kw}'")
+        print(
+            f"  ❌ FAIL — TG Pre-Send Payload Validation Failed! Payload does not contain '{expected_kw}'"
+        )
         print(f"     Actual TG Payload: '{tg_payload2.strip()}'")
         result = False
 
@@ -245,7 +265,9 @@ async def test_agent(name: str, driver):
 
 async def main():
     print("\n🚀 AOH Multi-Protocol Sequential Integration Test")
-    print("   Testing 4 Agents (Pi Agent, OpenCode, OMP, Claude Code) sequentially for 2-turn dialogue")
+    print(
+        "   Testing 4 Agents (Pi Agent, OpenCode, OMP, Claude Code) sequentially for 2-turn dialogue"
+    )
     print("   Validating Telegram Pre-Send Message Payload & Strict Project Path Matching\n")
 
     agent_configs = [
@@ -269,9 +291,9 @@ async def main():
         # Brief cooldown between agents
         await asyncio.sleep(2.0)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("📋 INTEGRATION TEST FINAL REPORT")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     all_pass = True
     for name, passed in result_map.items():
         status = "✅ PASS" if passed else "❌ FAIL"
@@ -279,12 +301,12 @@ async def main():
         if not passed:
             all_pass = False
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     if all_pass:
         print("🎉 ALL 4 AGENT INTEGRATION TESTS (INCLUDING TG PAYLOAD VERIFICATION) PASSED!")
     else:
         print("⚠️  SOME AGENT INTEGRATION TESTS FAILED")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     return 0 if all_pass else 1
 

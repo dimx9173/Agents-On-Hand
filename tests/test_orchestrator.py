@@ -30,11 +30,10 @@ class TestAnsiCleaner(unittest.TestCase):
     def test_format_hermes_style(self):
         raw = "Executing tool: read auth.py\nHere is the auth file explanation."
         from agents_on_hand.ansi_cleaner import format_hermes_style
+
         formatted = format_hermes_style(raw)
         self.assertIn("🛠️ *Tool*: `read auth.py`", formatted)
         self.assertIn("Here is the auth file explanation.", formatted)
-
-
 
 
 class TestConfigPermissions(unittest.TestCase):

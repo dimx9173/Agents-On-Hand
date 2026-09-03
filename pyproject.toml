@@ -23,7 +23,7 @@ warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true
 check_untyped_defs = false
-disable_error_code = ["var-annotated", "attr-defined", "union-attr", "name-defined", "no-any-return", "arg-type", "assignment", "abstract", "return", "index"]
+disable_error_code = ["var-annotated", "attr-defined", "union-attr", "name-defined", "no-any-return", "abstract", "index"]
 
 [[tool.mypy.overrides]]
 module = "pexpect.*"
@@ -39,7 +39,7 @@ branch = true
 omit = ["tests/*"]
 
 [tool.coverage.report]
-fail_under = 67
+fail_under = 80
 show_missing = true
 skip_covered = false
 

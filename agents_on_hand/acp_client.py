@@ -184,6 +184,13 @@ class ACPClient:
 
         fut = asyncio.get_running_loop().create_future()
         self._pending_requests[req_id] = fut
+        # Bound growth: timed-out entries are popped on TimeoutError, but a
+        # leaked entry (never answered, never timed out) must not grow forever.
+        if len(self._pending_requests) > 100:
+            oldest = next(iter(self._pending_requests))
+            old_fut = self._pending_requests.pop(oldest)
+            if not old_fut.done():
+                old_fut.cancel()
 
         msg_bytes = (json.dumps(req_payload) + "\n").encode("utf-8")
         self.process.stdin.write(msg_bytes)
@@ -205,6 +212,7 @@ class ACPClient:
                 )
             return result
         except asyncio.TimeoutError:
+            self._pending_requests.pop(req_id, None)
             elapsed = time.monotonic() - _t0
             logger.error(
                 f"ACP call '{method}' (req_id={req_id}) TIMED OUT after {elapsed:.3f}s "

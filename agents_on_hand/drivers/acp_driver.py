@@ -63,6 +63,7 @@ class ACPDriver(BaseDriver):
     def __init__(self, command: str, working_dir: Path):
         super().__init__(command, working_dir)
         self.client: ACPClient | None = None
+        self._monitor_task: asyncio.Task | None = None
 
     def set_trace(self, trace) -> None:
         """Attach SessionTraceLogger for ACP correlation."""
@@ -88,7 +89,7 @@ class ACPDriver(BaseDriver):
 
             await self.client.start()
             self.is_running = True
-            asyncio.create_task(self._monitor_exit())
+            self._monitor_task = asyncio.create_task(self._monitor_exit())
             return True
         except Exception as e:
             logger.warning(f"ACPDriver probing failed for command '{self.command}': {e}")
@@ -102,8 +103,15 @@ class ACPDriver(BaseDriver):
         if self.client and self.client._read_task:
             try:
                 await self.client._read_task
+            except asyncio.CancelledError:
+                # Shutdown path: read task cancelled, session already stopping.
+                return
             except Exception:
                 pass
+        if not self.is_running:
+            # Already stopped (e.g. stop() during shutdown) — avoid a stale EXIT
+            # resurrecting listeners after teardown.
+            return
         self.is_running = False
         self.emit_event(DriverEvent(DriverEvent.EXIT, exit_code=0))
 
@@ -179,7 +187,13 @@ class ACPDriver(BaseDriver):
             await self.client.respond_to_permission(request_id, approved)
 
     def stop(self):
-        """Stop the ACP client."""
+        """Terminate the ACP subprocess and its tree (idempotent)."""
         self.is_running = False
+        if self._monitor_task and not self._monitor_task.done():
+            self._monitor_task.cancel()
+        self._monitor_task = None
         if self.client:
-            self.client.stop()
+            try:
+                self.client.stop()
+            except Exception:
+                pass

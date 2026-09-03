@@ -70,35 +70,6 @@ def clean_cli_output(raw_text: str) -> str:
 
     clean = strip_ansi_codes(raw_text)
 
-    # Keywords for static TUI banners in omp / claude / prime / interactive tools
-    tui_banner_keywords = [
-        "omp v",
-        "Claude Code",
-        "Prime Agent",
-        "prime-agent",
-        "Welcome back!",
-        "for prompt actions",
-        "for commands",
-        "to run bash",
-        "to run python",
-        "LSP Servers",
-        "No LSP servers",
-        "Recent sessions",
-        "Ctrl+D can be used to exit",
-        "ctrl+r to search",
-        "Executable not found in $PATH",
-        "Connected: ",
-        "connecting: ",
-        "Failed: ",
-        "MiniMax-M3",
-        "Session accent",
-        "Theme used when",
-        "Tight Layout",
-        "Closing session",
-    ]
-
-    box_char_pattern = re.compile(r"[\u2500-\u257F\u2580-\u259F╭╰│─┌┐└┘├┤┼╯┬┴\s]+")
-
     filtered_lines = []
     for line in clean.splitlines():
         line_str = line.strip()
@@ -106,13 +77,17 @@ def clean_cli_output(raw_text: str) -> str:
             continue
 
         # Skip pure TUI box drawing lines
-        stripped_box = box_char_pattern.sub("", line_str)
+        stripped_box = _BOX_CHAR_PATTERN.sub("", line_str)
         if not stripped_box:
             continue
 
-        # Skip static TUI header/banner lines
-        if any(kw.lower() in line_str.lower() for kw in tui_banner_keywords):
-            continue
+        # Skip static TUI header/banner lines.
+        # Fast path: TUI banners are short (<80 chars); long content lines
+        # skip the keyword scan entirely.
+        if len(line_str) < 80:
+            lowered = line_str.lower()
+            if any(kw in lowered for kw in _TUI_BANNER_KEYWORDS_LOWER):
+                continue
 
         # Skip raw internal JSON hook dumps or transcript diagnostics
         if (
@@ -122,11 +97,7 @@ def clean_cli_output(raw_text: str) -> str:
             continue
 
         # Strip TUI side borders from active lines (e.g. │  hello  │ -> hello)
-        cleaned_line = re.sub(
-            r"^[\u2500-\u257F\u2580-\u259F╭╰│─┌┐└┘├┤┼╯┬┴╘╒╓╫╪█▀▄▌▐╟╢┼\s]+|[\u2500-\u257F\u2580-\u259F╭╰│─┌┐└┘├┤┼╯┬┴╘╒╓╫╪█▀▄▌▐╟╢┼\s]+$",
-            "",
-            line_str,
-        ).strip()
+        cleaned_line = _SIDE_BORDER_PATTERN.sub("", line_str).strip()
         if cleaned_line:
             # Deduplicate consecutive identical lines from terminal redraws
             if not filtered_lines or cleaned_line != filtered_lines[-1]:
@@ -144,6 +115,62 @@ def escape_html(text: str) -> str:
 
 TABLE_SEPARATOR_PATTERN = re.compile(r"^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$")
 
+# Static TUI banner keywords (lowercased once at import; see clean_cli_output).
+# NOTE: "failed: " has a trailing space to avoid matching normal agent prose
+# like "request failed: ..."; short generic words are intentionally excluded.
+_TUI_BANNER_KEYWORDS_LOWER = (
+    "omp v",
+    "claude code",
+    "prime agent",
+    "prime-agent",
+    "welcome back!",
+    "for prompt actions",
+    "for commands",
+    "to run bash",
+    "to run python",
+    "lsp servers",
+    "no lsp servers",
+    "recent sessions",
+    "ctrl+d can be used to exit",
+    "ctrl+r to search",
+    "executable not found in $path",
+    "connected: ",
+    "connecting: ",
+    "failed: ",
+    "minimax-m3",
+    "session accent",
+    "theme used when",
+    "tight layout",
+    "closing session",
+)
+
+# Pre-compiled patterns for the streaming render path (avoid re.compile per call).
+_BOX_CHAR_PATTERN = re.compile(r"[\u2500-\u257f\u2580-\u259f╭╰│─┌┐└┘├┤┼╯┬┴\s]+")
+_SIDE_BORDER_PATTERN = re.compile(
+    r"^[\u2500-\u257f\u2580-\u259f╭╰│─┌┐└┘├┤┼╯┬┴╘╒╓╫╪█▀▄▌▐╟╢┼\s]+"
+    r"|[\u2500-\u257f\u2580-\u259f╭╰│─┌┐└┘├┤┼╯┬┴╘╒╓╫╪█▀▄▌▐╟╢┼\s]+$"
+)
+_MD_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((https?://[^\s\)]+)\)")
+_MD_BOLD_PATTERN = re.compile(r"\*\*(.+?)\*\*")
+_MD_BOLD_US_PATTERN = re.compile(r"__(.+?)__")
+_MD_STRIKE_PATTERN = re.compile(r"~~(.+?)~~")
+_MD_STRIKE_S_PATTERN = re.compile(r"~([^~\s]+?)~")
+_MD_ITALIC_STAR_PATTERN = re.compile(r"(?<!\w)\*([^*\n]+?)\*(?!\w)")
+_MD_ITALIC_US_PATTERN = re.compile(r"(?<!\w)_([^_\n]+?)_(?!\w)")
+_MD_INLINE_CODE_PATTERN = re.compile(r"(`[^`\n]+`)")
+_MD_HEADER_PATTERN = re.compile(r"^(#{1,6})\s+(.+)$")
+_MD_HEADER_BOLD_STRIP_PATTERN = re.compile(r"^\*\*(.+?)\*\*$")
+_MD_LIST_PATTERN = re.compile(r"^(\s*)[-*+]\s+(.+)$")
+_MD_TOOL_LINE_PATTERN = re.compile(
+    r"^(?:running\s+tool|executing\s+tool|tool|bash|edit|read|grep|write|glob|python)\s*[:>]\s*(.+)$",
+    re.IGNORECASE,
+)
+_TRAILING_TAG_PATTERN = re.compile(r'\s*<[a-zA-Z0-9_\-\s="]*$')
+_TRAILING_ENTITY_PATTERN = re.compile(r"\s*&[a-zA-Z0-9#]*$")
+_TAG_PATTERN = re.compile(r"<(/)?([a-zA-Z0-9_\-]+)(?:\s+[^>]*)?>")
+_TAG_SPLIT_PATTERN = re.compile(r"<(/)?([a-zA-Z0-9_\-]+)(\s+[^>]*)?>")
+_MD_TABLE_CELL_PATTERN = re.compile(r"(?<!\\)\|")
+
 
 def split_markdown_table_row(row_str: str) -> list[str]:
     """Split a markdown table row by pipe '|' into stripped cell strings."""
@@ -152,7 +179,7 @@ def split_markdown_table_row(row_str: str) -> list[str]:
         stripped = stripped[1:]
     if stripped.endswith("|"):
         stripped = stripped[:-1]
-    cells = [c.strip() for c in re.split(r"(?<!\\)\|", stripped)]
+    cells = [c.strip() for c in _MD_TABLE_CELL_PATTERN.split(stripped)]
     return cells
 
 
@@ -319,12 +346,12 @@ def markdown_to_telegram_html(md_text: str) -> str:
             continue
 
         # Header check: # Header -> 📌 <b>Header</b>, ## Header -> 🔹 <b>Header</b>, ### Header -> ▪️ <b>Header</b>
-        header_match = re.match(r"^(#{1,6})\s+(.+)$", line)
+        header_match = _MD_HEADER_PATTERN.match(line)
         if header_match:
             level = len(header_match.group(1))
             header_text = header_match.group(2).strip()
             # Strip redundant outer bold markers in header
-            header_text = re.sub(r"^\*\*(.+?)\*\*$", r"\1", header_text)
+            header_text = _MD_HEADER_BOLD_STRIP_PATTERN.sub(r"\1", header_text)
             prefix = "📌 " if level == 1 else ("🔹 " if level == 2 else "▪️ ")
             html_lines.append(f"{prefix}<b>{_format_inline_markdown(header_text)}</b>")
             continue
@@ -336,7 +363,7 @@ def markdown_to_telegram_html(md_text: str) -> str:
             continue
 
         # Unordered list: - item or * item -> • item
-        list_match = re.match(r"^(\s*)[-*+]\s+(.+)$", line)
+        list_match = _MD_LIST_PATTERN.match(line)
         if list_match:
             indent = list_match.group(1)
             item_text = list_match.group(2)
@@ -365,7 +392,7 @@ def _format_inline_markdown(text: str) -> str:
 
     # Split text into inline code segments and non-code segments
     # Pattern to match inline code: `code`
-    parts = re.split(r"(`[^`\n]+`)", text)
+    parts = _MD_INLINE_CODE_PATTERN.split(text)
     formatted_parts = []
 
     for part in parts:
@@ -377,21 +404,19 @@ def _format_inline_markdown(text: str) -> str:
             escaped = escape_html(part)
 
             # Markdown links: [text](url) -> <a href="url">text</a>
-            escaped = re.sub(
-                r"\[([^\]]+)\]\((https?://[^\s\)]+)\)", r'<a href="\2">\1</a>', escaped
-            )
+            escaped = _MD_LINK_PATTERN.sub(r'<a href="\2">\1</a>', escaped)
 
             # Bold: **text** or __text__ -> <b>text</b>
-            escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
-            escaped = re.sub(r"__(.+?)__", r"<b>\1</b>", escaped)
+            escaped = _MD_BOLD_PATTERN.sub(r"<b>\1</b>", escaped)
+            escaped = _MD_BOLD_US_PATTERN.sub(r"<b>\1</b>", escaped)
 
             # Strikethrough: ~~text~~ or ~text~ -> <s>text</s>
-            escaped = re.sub(r"~~(.+?)~~", r"<s>\1</s>", escaped)
-            escaped = re.sub(r"~([^~\s]+?)~", r"<s>\1</s>", escaped)
+            escaped = _MD_STRIKE_PATTERN.sub(r"<s>\1</s>", escaped)
+            escaped = _MD_STRIKE_S_PATTERN.sub(r"<s>\1</s>", escaped)
 
             # Italic: *text* or _text_ (excluding inside words like file_name_test)
-            escaped = re.sub(r"(?<!\w)\*([^*\n]+?)\*(?!\w)", r"<i>\1</i>", escaped)
-            escaped = re.sub(r"(?<!\w)_([^_\n]+?)_(?!\w)", r"<i>\1</i>", escaped)
+            escaped = _MD_ITALIC_STAR_PATTERN.sub(r"<i>\1</i>", escaped)
+            escaped = _MD_ITALIC_US_PATTERN.sub(r"<i>\1</i>", escaped)
 
             formatted_parts.append(escaped)
 
@@ -407,14 +432,13 @@ def balance_telegram_html_tags(html_text: str) -> str:
         return ""
 
     # Remove incomplete trailing tag at the very end of stream (e.g. "<pre" or "<b" or "&am")
-    cleaned = re.sub(r'\s*<[a-zA-Z0-9_\-\s="]*$', "", html_text)
-    cleaned = re.sub(r"\s*&[a-zA-Z0-9#]*$", "", cleaned)
+    cleaned = _TRAILING_TAG_PATTERN.sub("", html_text)
+    cleaned = _TRAILING_ENTITY_PATTERN.sub("", cleaned)
 
     # Find all opening and closing tags
-    tag_pattern = re.compile(r"<(/)?([a-zA-Z0-9_\-]+)(?:\s+[^>]*)?>")
     open_stack = []
 
-    for match in tag_pattern.finditer(cleaned):
+    for match in _TAG_PATTERN.finditer(cleaned):
         is_closing = bool(match.group(1))
         tag_name = match.group(2).lower()
 
@@ -449,7 +473,6 @@ def split_html_into_chunks(html_text: str, max_chars: int = 3800) -> list[str]:
 
     chunks = []
     remaining = html_text
-    tag_regex = re.compile(r"<(/)?([a-zA-Z0-9_\-]+)(\s+[^>]*)?>")
 
     while len(remaining) > max_chars:
         # Search for safe split point before max_chars
@@ -471,7 +494,7 @@ def split_html_into_chunks(html_text: str, max_chars: int = 3800) -> list[str]:
         open_tags_with_attrs: list[str] = []
         open_tags_names: list[str] = []
 
-        for match in tag_regex.finditer(head):
+        for match in _TAG_SPLIT_PATTERN.finditer(head):
             is_closing = bool(match.group(1))
             tag_name = match.group(2).lower()
             full_open_tag = match.group(0)
@@ -611,11 +634,7 @@ def format_hermes_style(text: str) -> str:
             continue
 
         # Tool execution pattern (e.g. bash: git status, edit: auth.py, read: config.json)
-        tool_match = re.match(
-            r"^(?:running\s+tool|executing\s+tool|tool|bash|edit|read|grep|write|glob|python)\s*[:>]\s*(.+)$",
-            line_str,
-            re.IGNORECASE,
-        )
+        tool_match = _MD_TOOL_LINE_PATTERN.match(line_str)
         if tool_match:
             tool_detail = tool_match.group(1).strip()
             formatted_lines.append(f"🛠️ *Tool*: `{tool_detail}`")

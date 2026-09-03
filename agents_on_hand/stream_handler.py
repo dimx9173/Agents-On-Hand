@@ -81,6 +81,17 @@ class UnifiedStreamer:
         self._trailing_flush_task: asyncio.Task | None = None
         self._wait_indicator_task: asyncio.Task | None = None
         self._pending_tool_req_ids: set[str] = set()
+        # P2 render cache: _flush_edit_locked re-renders the FULL accumulated
+        # text on every throttle tick (O(n) per edit). Skip the Telegram edit
+        # when the rendered output is byte-identical to the last delivery.
+        self._last_rendered: str = ""
+        self._last_rendered_chunk0: str = ""
+        # Dirty-flag: set by _on_driver_event, cleared on flush. Lets idle
+        # throttle ticks skip render + split + edit entirely.
+        self._dirty: bool = False
+        # Monotonic counter of delivered chunks; a new chunk (pagination)
+        # forces delivery even if the first chunk text is unchanged.
+        self._delivered_chunks: int = 0
 
     @property
     def current_msg_id(self) -> int | None:
@@ -146,6 +157,10 @@ class UnifiedStreamer:
         self.tool_results = []
         self._tool_count = 0
         self.msg_ids.clear()
+        self._last_rendered = ""
+        self._last_rendered_chunk0 = ""
+        self._delivered_chunks = 0
+        self._dirty = False
         self._is_turn_final = False
         self._pending_tool_req_ids.clear()
         self._cancel_wait_indicator()
@@ -214,6 +229,7 @@ class UnifiedStreamer:
 
         if e_type == DriverEvent.TEXT_DELTA:
             self.current_text += event.content
+            self._dirty = True
             logger.debug(
                 f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=TEXT_DELTA +{len(event.content)} chars total={len(self.current_text)}"
             )
@@ -221,6 +237,7 @@ class UnifiedStreamer:
 
         elif e_type == DriverEvent.THOUGHT_DELTA:
             self.current_thought += event.content
+            self._dirty = True
             logger.debug(
                 f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=THOUGHT_DELTA +{len(event.content)} chars total={len(self.current_thought)}"
             )
@@ -234,6 +251,7 @@ class UnifiedStreamer:
 
         elif e_type == DriverEvent.TOOL_RESULT:
             self._tool_count += 1
+            self._dirty = True
             content_str = str(event.content).strip()
             preview = (content_str[:80] + "...") if len(content_str) > 80 else content_str
             self.tool_results.append(
@@ -253,6 +271,7 @@ class UnifiedStreamer:
                 f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type={e_type} is_final=True text={len(self.current_text)} thought={len(self.current_thought)} tools={self._tool_count}"
             )
             self._is_turn_final = True
+            self._dirty = True
             self._stop_typing()
             asyncio.create_task(self._schedule_edit())
 
@@ -472,15 +491,48 @@ class UnifiedStreamer:
         except RuntimeError:
             self._last_edit_time = 0.0
 
+        if not self._dirty and not self._is_turn_final:
+            return
+        self._dirty = False
+
         formatted = self._render_content(
             self.current_text, self.current_thought, is_final=self._is_turn_final
         )
         if not formatted.strip():
             return
 
+        # Skip the Telegram edit when nothing visible changed (e.g. a delta
+        # that only altered whitespace stripped by the cleaner, or a trailing
+        # flush racing an already-delivered state). Final turns always flush
+        # so the footer + action buttons are attached.
+        if not self._is_turn_final and formatted == self._last_rendered:
+            return
+
         chunks = split_html_into_chunks(formatted, max_chars=3800)
         if not chunks:
             return
+
+        # Same-chunk-count fast path: only the last chunk can change while
+        # earlier chunks are frozen. Skip re-editing frozen prefix chunks —
+        # each skipped edit saves one Telegram API call.
+        if not self._is_turn_final and self._delivered_chunks == len(chunks) and len(chunks) > 1:
+            first_now = chunks[0]
+            first_before = self._last_rendered_chunk0
+            if first_now == first_before:
+                chunk = chunks[-1]
+                is_last = True
+                if len(self.msg_ids) >= len(chunks):
+                    target_id = self.msg_ids[-1]
+                    delivered_id = await self._deliver_single(chunk, target_id)
+                    if delivered_id and delivered_id != target_id:
+                        self.msg_ids[-1] = delivered_id
+                else:
+                    new_id = await self._deliver_single(chunk, None)
+                    if new_id:
+                        self.msg_ids.append(new_id)
+                self._last_rendered = formatted
+                self._last_rendered_chunk0 = first_now
+                return
 
         action_markup = None
         if self._is_turn_final:
@@ -512,6 +564,10 @@ class UnifiedStreamer:
                 new_id = await self._deliver_single(chunk, None, reply_markup=chunk_markup)
                 if new_id:
                     self.msg_ids.append(new_id)
+
+        self._last_rendered = formatted
+        self._last_rendered_chunk0 = chunks[0] if chunks else ""
+        self._delivered_chunks = len(chunks)
 
 
 # Compatibility Alias for bot.py and tests

@@ -138,6 +138,12 @@ async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE
             await asyncio.sleep(0.4)
             if active_session.is_running or not getattr(active_session, "is_starting", False):
                 break
+            # S4: probe/start failure sets is_running False while is_starting
+            # may still be True (start() in finally). Detect a dead driver
+            # early instead of waiting out the full 3.2s window.
+            driver = getattr(active_session, "driver", None)
+            if driver is not None and not getattr(driver, "is_running", True):
+                break
         if active_session.is_starting and not active_session.is_running:
             await update.message.reply_text(
                 "⏳ *Session 仍在啟動中*（探測 Driver / 初始化），請稍候幾秒再傳送訊息。",

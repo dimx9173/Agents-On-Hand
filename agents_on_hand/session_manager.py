@@ -71,6 +71,15 @@ class AgentSession:
         # Buffer for recent live streaming
         self.recent_output: str = ""
 
+        # P3 batched log writer: TEXT_DELTA events arrive at high frequency
+        # (one open/write/close per delta). Buffer and flush on size (64KB),
+        # age (2s), or turn end — cuts file syscalls ~100x under burst load.
+        # NOTE: log_file_path honours a custom SESSION_LOG_DIR; the parent is
+        # created lazily on first flush so import/construct stays side-effect free.
+        self._log_buffer: list[str] = []
+        self._log_buffer_chars: int = 0
+        self._log_last_flush: float = 0.0
+
         # Structured per-session trace log
         self.trace = SessionTraceLogger(session_id)
         self.trace.event("SESSION_INIT", f"agent={agent_name} command={command} cwd={working_dir}")
@@ -183,8 +192,7 @@ class AgentSession:
             self.recent_output += event.content
             if len(self.recent_output) > 10000:
                 self.recent_output = self.recent_output[-8000:]
-            with open(self.log_file_path, "a", encoding="utf-8") as f:
-                f.write(event.content)
+            self._buffer_log(event.content)
 
         elif event.event_type == DriverEvent.THOUGHT_DELTA and event.content:
             self.trace.thought_delta(len(event.content))
@@ -203,6 +211,7 @@ class AgentSession:
             )
 
         elif event.event_type in (DriverEvent.TURN_END, DriverEvent.EXIT):
+            self.flush_log_buffer()
             # Record response completion timing
             if self._response_start_time is not None:
                 elapsed = time.monotonic() - self._response_start_time
@@ -227,17 +236,36 @@ class AgentSession:
                 except Exception as e:
                     logger.error(f"Error in session exit callback: {e}")
 
+    def _buffer_log(self, content: str) -> None:
+        """Append to the batched log buffer, flushing on size or age."""
+        self._log_buffer.append(content)
+        self._log_buffer_chars += len(content)
+        now = time.monotonic()
+        if self._log_buffer_chars >= 65536 or (now - self._log_last_flush) >= 2.0:
+            self.flush_log_buffer()
+
+    def flush_log_buffer(self) -> None:
+        """Write buffered log content to disk in a single append (fsync-free)."""
+        if not self._log_buffer:
+            return
+        data = "".join(self._log_buffer)
+        self._log_buffer = []
+        self._log_buffer_chars = 0
+        self._log_last_flush = time.monotonic()
+        try:
+            self.log_file_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.log_file_path, "a", encoding="utf-8") as f:
+                f.write(data)
+        except Exception as e:
+            logger.error(f"Error writing session log: {e}")
+
     def send_input(self, text: str, turn_id: str | None = None):
         """Send prompt to active driver."""
         if self.driver and self.is_running:
             self.last_user_prompt = text
             self.trace.user_input(text, turn_id=turn_id)
             # Record user prompt in log file for complete conversation history
-            try:
-                with open(self.log_file_path, "a", encoding="utf-8") as f:
-                    f.write(f"\n👤 User: {text}\n\n")
-            except Exception as e:
-                logger.error(f"Error writing user prompt to log: {e}")
+            self._buffer_log(f"\n👤 User: {text}\n\n")
 
             # Reset per-response timing counters
             self._response_start_time = time.monotonic()
@@ -291,6 +319,7 @@ class AgentSession:
     def stop(self):
         """Stop active session and driver."""
         self.is_running = False
+        self.flush_log_buffer()
         if self.driver:
             self.driver.stop()
         # Flush and close structured trace log
@@ -300,15 +329,30 @@ class AgentSession:
             pass
 
     def get_last_n_lines(self, n: int = 100) -> str:
-        """Read last N lines from log file."""
+        """Read last N lines from log file (tail-seek, O(window) not O(file))."""
+        self.flush_log_buffer()
         if not self.log_file_path.exists():
             return self.recent_output or "(No logs recorded yet)"
 
         try:
-            with open(self.log_file_path, encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
-                last_lines = "".join(lines[-n:])
-                return strip_ansi_codes(last_lines)
+            # Seek-based tail: read at most the last 64KB instead of the
+            # whole file. 100 lines of agent output virtually always fit;
+            # fall back to a full read only if fewer than n lines found.
+            with open(self.log_file_path, "rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                f.seek(max(0, size - 65536))
+                tail_text = f.read().decode("utf-8", errors="replace")
+            tail_lines = tail_text.splitlines(keepends=True)
+            # A 64KB window holds far more than n=100 lines in practice; only
+            # fall back to a full read when the window didn't reach the file
+            # start AND looks truncated (fewer newline-terminated lines than n).
+            newline_count = tail_text.count("\n")
+            if size > 65536 and newline_count < n:
+                with open(self.log_file_path, encoding="utf-8", errors="replace") as f:
+                    tail_lines = f.readlines()
+            last_lines = "".join(tail_lines[-n:])
+            return strip_ansi_codes(last_lines)
         except Exception as e:
             logger.error(f"Error reading log file: {e}")
             return f"Error reading log file: {e}"

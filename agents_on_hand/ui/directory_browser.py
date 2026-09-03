@@ -17,6 +17,41 @@ from ..session_manager import session_manager
 logger = logging.getLogger("AgentsOnHand")
 
 
+def _build_recent_dirs_row(update: Update, target_dir: Path) -> list[InlineKeyboardButton] | None:
+    """Up to 3 ⭐ buttons for the user's most recently used session dirs.
+
+    Skips the directory currently being browsed. Returns None when there is
+    nothing useful to shortcut (keeps the keyboard compact).
+    """
+    try:
+        user_id = (
+            update.callback_query.from_user.id
+            if update.callback_query
+            else update.effective_user.id
+        )
+    except Exception:
+        return None
+    seen: list[Path] = []
+    for s in session_manager.list_user_sessions(user_id):
+        try:
+            d = Path(s.working_dir)
+        except Exception:
+            continue
+        if d == target_dir or d in seen:
+            continue
+        if not is_path_allowed(d) or not d.exists():
+            continue
+        seen.append(d)
+        if len(seen) >= 3:
+            break
+    if not seen:
+        return None
+    return [
+        InlineKeyboardButton(f"⭐ {d.name}", callback_data=f"dir:nav:{get_path_token(d)}:0")
+        for d in seen
+    ]
+
+
 async def send_directory_browser(
     update: Update, context: ContextTypes.DEFAULT_TYPE, target_dir: Path, page: int = 0
 ) -> None:
@@ -30,6 +65,12 @@ async def send_directory_browser(
         return
     target_token = get_path_token(target_dir)
     keyboard = []
+    # U4: ⭐ recent dirs (sessions you actually used) on page 1 — one tap
+    # back to a working directory instead of browsing from the root.
+    if page == 0:
+        recent_row = _build_recent_dirs_row(update, target_dir)
+        if recent_row:
+            keyboard.append(recent_row)
     parent_dir = target_dir.parent
     if parent_dir != target_dir and is_path_allowed(parent_dir):
         parent_token = get_path_token(parent_dir)
@@ -84,8 +125,36 @@ async def send_directory_browser(
 
 @restricted
 async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Start flow: agent picker in the default dir (1 tap to launch).
+
+    U3: the old flow forced dir-browser → agent-picker (2+ taps) on every
+    /aoh_new even though most launches reuse the same directory. The agent
+    picker keeps a 📂 directory row for the rare case you need to browse.
+    """
     initial_dir = ALLOWED_ROOT_DIRS[0] if ALLOWED_ROOT_DIRS else Path.cwd()
-    await send_directory_browser(update, context, initial_dir)
+    initial_dir = initial_dir.expanduser().resolve()
+    if update.callback_query:
+        await show_agent_selector(update.callback_query, initial_dir)
+    else:
+        await _send_agent_picker_new_message(update, context, initial_dir)
+
+
+async def _send_agent_picker_new_message(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, working_dir: Path
+) -> None:
+    """Agent picker as a fresh message (for /aoh_new entry)."""
+    reply_markup = _build_agent_picker_keyboard(working_dir)
+    if reply_markup is None:
+        await update.message.reply_text(
+            f"⚠️ *檢測不到任何已安裝的 CLI Agent*:\n📁 `{working_dir}`",
+            parse_mode="Markdown",
+        )
+        return
+    await update.message.reply_text(
+        f"⚙️ *選 Agent* · 📁 `{working_dir}`",
+        parse_mode="Markdown",
+        reply_markup=reply_markup,
+    )
 
 
 @restricted
@@ -117,36 +186,49 @@ async def directory_callback_handler(update: Update, context: ContextTypes.DEFAU
         await show_agent_selector(query, target_path)
 
 
-async def show_agent_selector(query, working_dir: Path) -> None:  # type: ignore[no-untyped-def]
+def _build_agent_picker_keyboard(working_dir: Path) -> InlineKeyboardMarkup | None:
+    """Shared compact agent picker: one row per agent + a 📂 directory row.
+
+    Returns None when no agents are installed (callers render the warning).
+    """
     dir_token = get_path_token(working_dir)
     installed_agents = get_installed_cli_agents()
+    if not installed_agents:
+        return None
     keyboard: list[list[InlineKeyboardButton]] = []
-    if installed_agents:
-        for key, info in installed_agents.items():
-            mode_badge = " [ACP]" if info.get("use_acp") else ""
-            keyboard.append(
-                [
-                    InlineKeyboardButton(
-                        f"🚀 啟動 {info['name']}{mode_badge}",
-                        callback_data=f"agent:start:{dir_token}:{key}",
-                    )
-                ]
-            )
-    else:
-        text_no_agents = f"⚠️ *檢測不到任何已安裝的 CLI Agent*:\n📁 `{working_dir}`\n\n請確認系統 PATH 環境變數或安裝工具。"
+    for key, info in installed_agents.items():
+        mode_badge = " [ACP]" if info.get("use_acp") else ""
         keyboard.append(
-            [InlineKeyboardButton("🔙 返回目錄選擇", callback_data=f"dir:nav:{dir_token}:0")]
+            [
+                InlineKeyboardButton(
+                    f"🚀 {info['name']}{mode_badge}",
+                    callback_data=f"agent:start:{dir_token}:{key}",
+                )
+            ]
         )
+    keyboard.append(
+        [InlineKeyboardButton(f"📂 {working_dir.name}", callback_data=f"dir:nav:{dir_token}:0")]
+    )
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def show_agent_selector(query, working_dir: Path) -> None:  # type: ignore[no-untyped-def]
+    reply_markup = _build_agent_picker_keyboard(working_dir)
+    if reply_markup is None:
+        dir_token = get_path_token(working_dir)
         await query.edit_message_text(
-            text_no_agents, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)
+            f"⚠️ *檢測不到任何已安裝的 CLI Agent*:\n📁 `{working_dir}`\n\n請確認系統 PATH 環境變數或安裝工具。",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("📂 選擇目錄", callback_data=f"dir:nav:{dir_token}:0")]]
+            ),
         )
         return
-    keyboard.append(
-        [InlineKeyboardButton("🔙 返回目錄選擇", callback_data=f"dir:nav:{dir_token}:0")]
+    await query.edit_message_text(
+        f"⚙️ *選 Agent* · 📁 `{working_dir}`",
+        parse_mode="Markdown",
+        reply_markup=reply_markup,
     )
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    text = f"⚙️ *選擇欲在下列目錄啟動的 CLI Agent* (共 {len(installed_agents)} 個已安裝工具):\n📁 `{working_dir}`"
-    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=reply_markup)
 
 
 async def agent_start_callback_handler(update, context):  # type: ignore[no-untyped-def]

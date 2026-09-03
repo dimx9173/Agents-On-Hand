@@ -14,6 +14,7 @@ from .handlers.chat import (
     ctrlc_command,
     esc_command,
     help_command,
+    help_menu_callback_handler,
     stop_command,
     text_message_router,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "path_to_token",
     "restart_registry",
     "help_command",
+    "help_menu_callback_handler",
     "new_command",
     "sessions_command",
     "prune_command",

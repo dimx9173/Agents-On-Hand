@@ -73,6 +73,7 @@ async def test_sessions_command_button_label_strips_sess_prefix():
     from agents_on_hand.ui.session_menu import sessions_command
 
     s = _mock_session("sess_abc12345", "Bash", True, active=False)
+    s.working_dir = Path("/tmp/myproj")
     with patch("agents_on_hand.ui.session_menu.session_manager") as sm:
         sm.list_user_sessions.return_value = [s]
         sm.get_active_session.return_value = None
@@ -89,7 +90,10 @@ async def test_sessions_command_button_label_strips_sess_prefix():
             for b in row
             if b.callback_data == "sess:switch:sess_abc12345"
         ][0]
-        assert btn.text == "▶️ abc12345"
+        assert btn.text.startswith("▶️ ")
+        assert "abc12345" in btn.text
+        assert "sess_abc12345" not in btn.text
+        assert "myproj" in btn.text
         assert btn.callback_data == "sess:switch:sess_abc12345"
 
 

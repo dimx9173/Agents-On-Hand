@@ -376,7 +376,13 @@ async def test_help_command():
         with patch("agents_on_hand.security.is_user_allowed", return_value=True):
             await help_command(update, MagicMock())
         update.message.reply_text.assert_called_once()
-        assert "Claude" in update.message.reply_text.call_args[0][0]
+        txt = update.message.reply_text.call_args[0][0]
+        assert "2/" in txt  # compact installed count instead of wall of text
+        markup = update.message.reply_text.call_args[1].get("reply_markup")
+        assert markup is not None
+        btns = [b for row in markup.inline_keyboard for b in row]
+        assert any(b.callback_data == "help:goto:new" for b in btns)
+        assert any(b.callback_data == "help:goto:sessions" for b in btns)
 
 
 @pytest.mark.asyncio

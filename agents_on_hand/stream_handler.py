@@ -175,20 +175,31 @@ class UnifiedStreamer:
         self._wait_indicator_task = asyncio.create_task(self._wait_indicator_loop())
 
     async def _wait_indicator_loop(self):
-        """Show initial waiting message if model takes >4s to respond."""
+        """Live status line while the model is silent (>4s): elapsed + tools.
+
+        U6: on small screens a static "thinking..." message gives no sense of
+        progress. Refresh a one-line status (⏳ 12s · 🛠️ 3) until the first
+        delta arrives, then hand over to the normal stream renderer.
+        """
         try:
             await asyncio.sleep(4.0)
-            async with self._lock:
-                if (
-                    not self.current_text
-                    and not self.current_thought
-                    and self._is_active
-                    and not self.msg_ids
-                ):
-                    waiting_msg = "⏳ <b>Agent 正在思考與處理中，請稍候...</b>"
-                    first_id = await self._deliver(waiting_msg, None)
+            t0 = self._turn_start_time or 0.0
+            while self._is_active and not self.current_text and not self.current_thought:
+                try:
+                    now = asyncio.get_running_loop().time()
+                except RuntimeError:
+                    now = 0.0
+                elapsed = max(0, int(now - t0)) if t0 else 0
+                tools = f" · 🛠️ {self._tool_count}" if self._tool_count else ""
+                status = f"⏳ <b>處理中 {elapsed}s</b>{tools}"
+                async with self._lock:
+                    if self.msg_ids or not self._is_active:
+                        break
+                    first_id = await self._deliver(status, None)
                     if first_id:
                         self.msg_ids.append(first_id)
+                        break
+                await asyncio.sleep(4.0)
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -284,21 +295,24 @@ class UnifiedStreamer:
         if req_key:
             self._pending_tool_req_ids.add(req_key)
 
-        detail_str = f"<code>{escape_html(tool_name)}</code>"
+        detail_str = f"<b>{escape_html(tool_name)}</b>"
         if tool_args:
-            detail_str += f"\n<code>{escape_html(str(tool_args))}</code>"
+            args_str = str(tool_args)
+            if len(args_str) > 1500:
+                args_str = args_str[:1500] + "…"
+            detail_str += f"\n<pre><code>{escape_html(args_str)}</code></pre>"
 
-        text = f"🛡️ <b>Tool 執行審核請求</b>\nAgent 要求執行以下工具：\n{detail_str}\n\n請選擇是否授權："
+        text = f"🛡️ <b>執行 {escape_html(tool_name)}？</b>\n{detail_str}"
 
         reply_markup = InlineKeyboardMarkup(
             [
                 [
                     InlineKeyboardButton(
-                        "✅ 同意執行",
+                        "✅ 執行",
                         callback_data=f"acp_perm:approve:{self.session.session_id}:{req_id}",
                     ),
                     InlineKeyboardButton(
-                        "❌ 拒絕執行",
+                        "❌ 拒絕",
                         callback_data=f"acp_perm:reject:{self.session.session_id}:{req_id}",
                     ),
                 ]

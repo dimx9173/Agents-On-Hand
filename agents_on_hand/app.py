@@ -16,6 +16,7 @@ from .handlers.chat import (
     ctrlc_command,
     esc_command,
     help_command,
+    help_menu_callback_handler,
     stop_command,
     text_message_router,
 )
@@ -133,6 +134,7 @@ def main() -> None:
     app.add_handler(
         CallbackQueryHandler(session_restart_callback_handler, pattern=r"^sess_restart:")
     )
+    app.add_handler(CallbackQueryHandler(help_menu_callback_handler, pattern=r"^help:"))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, text_message_router))
     app.add_handler(MessageHandler(filters.COMMAND, text_message_router))
     print("🚀 Agents-On-Hand (Direct Chat Mode) 啟動中...")

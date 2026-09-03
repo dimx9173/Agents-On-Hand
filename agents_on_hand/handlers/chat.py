@@ -15,26 +15,61 @@ logger = logging.getLogger("AgentsOnHand")
 
 @restricted
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """U7: compact help — tappable command menu instead of a wall of text.
+
+    Small screens bury long help text; buttons put the 3 core flows
+    (new session / my sessions / interrupt) one tap away.
+    """
     installed = get_installed_cli_agents()
-    agent_status_lines = []
-    for key, info in AVAILABLE_CLI_AGENTS.items():
-        icon = "🟢 已安裝" if key in installed else "⚪ 未安裝"
-        acp_tag = " [ACP]" if info.get("use_acp") else ""
-        agent_status_lines.append(f"• *{info['name']}*{acp_tag}: {icon}")
-    agent_status_text = "\n".join(agent_status_lines)
-    welcome = (
-        "🤖 *Agents-On-Hand 遠端 CLI Orchestrator*\n\n"
-        "⚡ *系統管理指令*:\n"
-        "• `/aoh_new` - 開啟目錄選擇器與啟動 CLI Agent\n"
-        "• `/aoh_sessions` - 管理、切換、查看與刪除背景 Session\n"
-        "• `/aoh_prune` - 一鍵清理所有已離線的 Session\n"
-        "• `/aoh_stop` - 結束當前作用中的 Active Session\n"
-        "• `/aoh_help` - 顯示本說明檔\n\n"
-        f"🛠️ *系統 CLI / ACP Agent 安裝狀態*:\n{agent_status_text}\n\n"
-        "💡 *直通 Chat 對話模式*:\n"
-        "所有非 `/aoh_` 開頭的訊息與指令（如 `/commit`, `/clear` 或一般文字），皆會 100% 直通傳送至您當前活躍的 CLI Agent！"
+    n_ok = sum(1 for key in AVAILABLE_CLI_AGENTS if key in installed)
+    n_total = len(AVAILABLE_CLI_AGENTS)
+    active = session_manager.get_active_session(update.effective_user.id)
+    if active:
+        cur = f"\n🟢 當前：*{active.agent_name}* · `{active.session_id.removeprefix('sess_')}`"
+    else:
+        cur = "\n⚪ 目前沒有 Active Session"
+    text = (
+        f"🤖 *Agents-On-Hand* · {n_ok}/{n_total} 工具已安裝{cur}\n\n"
+        "直接打字即傳給 Agent；`esc` 中斷、`ctrlc` 強制停。"
     )
-    await update.message.reply_text(welcome, parse_mode="Markdown")
+    reply_markup = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🚀 開新 Session", callback_data="help:goto:new")],
+            [InlineKeyboardButton("📋 我的 Sessions", callback_data="help:goto:sessions")],
+            [
+                InlineKeyboardButton("⏸️ ESC", callback_data="help:ctrl:esc"),
+                InlineKeyboardButton("🛑 Ctrl+C", callback_data="help:ctrl:ctrlc"),
+            ],
+        ]
+    )
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+
+
+@restricted
+async def help_menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Route help-menu button taps to the real flows (no new commands to memorise)."""
+    from ..ui.directory_browser import new_command
+    from ..ui.session_menu import sessions_command
+
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split(":")
+    if len(parts) < 3:
+        return
+    # Callbacks carry no update.message — point it at the query message so
+    # downstream handlers (reply_text, effective_chat) work unchanged.
+    if update.message is None and getattr(query, "message", None) is not None:
+        update.message = query.message  # type: ignore[assignment]
+    if parts[1] == "goto":
+        if parts[2] == "new":
+            await new_command(update, context)
+        elif parts[2] == "sessions":
+            await sessions_command(update, context)
+    elif parts[1] == "ctrl":
+        if parts[2] == "esc":
+            await esc_command(update, context)
+        elif parts[2] == "ctrlc":
+            await ctrlc_command(update, context)
 
 
 @restricted

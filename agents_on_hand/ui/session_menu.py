@@ -16,34 +16,44 @@ if TYPE_CHECKING:
 logger = logging.getLogger("AgentsOnHand")
 
 
-def _build_session_row(
+def _session_label(s: "AgentSession", active_session: "AgentSession | None") -> str:
+    """One-line label for the /aoh_sessions list: icon + agent + folder + short id."""
+    icon = "🟢" if s.is_running else "🔴"
+    star = " ⭐" if active_session and active_session.session_id == s.session_id else ""
+    short_id = s.session_id.removeprefix("sess_")
+    return f"{icon} {s.agent_name}{star} · {s.working_dir.name} · `{short_id}`"
+
+
+def _build_session_rows(
     s: "AgentSession",
     active_session: "AgentSession | None",
-    user_id: int,
-) -> list[InlineKeyboardButton]:
-    """Build keyboard buttons for a single session row based on its state.
+) -> list[list[InlineKeyboardButton]]:
+    """Build compact 2-line keyboard rows for one session.
 
-    - Active + running  -> ⏸️ Pause + 📄 Log + 🛑 Delete
-    - Running (bg)      -> ▶️ Switch + 📄 Log + 🔄 Restart + 🛑 Delete
-    - Offline           -> 🔄 Restart + 📄 Log + 🛑 Delete
+    Line 1 (identity + primary action): switch/restart target as the label
+    itself so the button text carries context on narrow screens.
+    Line 2 (secondary): log + kill only. Destructive kill is always last.
+
+    - Active + running  -> [⭐ <label>] / [📄 Log][🛑 刪除]
+    - Running (bg)      -> [▶️ <label>] / [📄 Log][🛑 刪除]
+    - Offline           -> [🔄 <label>] / [📄 Log][🛑 刪除]
     """
-    row: list[InlineKeyboardButton] = []
     short_id = s.session_id.removeprefix("sess_")
+    label = f"{s.agent_name} · {s.working_dir.name} · {short_id}"
     is_active = active_session and active_session.session_id == s.session_id
 
     if is_active and s.is_running:
-        row.append(InlineKeyboardButton("⏸️ 暫停", callback_data=f"sess:pause:{s.session_id}"))
+        primary = InlineKeyboardButton(f"⭐ {label}", callback_data=f"sess:logs:{s.session_id}")
     elif s.is_running:
-        row.append(
-            InlineKeyboardButton(f"▶️ {short_id}", callback_data=f"sess:switch:{s.session_id}")
-        )
-        row.append(InlineKeyboardButton("🔄 重啟", callback_data=f"sess:restart:{s.session_id}"))
+        primary = InlineKeyboardButton(f"▶️ {label}", callback_data=f"sess:switch:{s.session_id}")
     else:
-        row.append(InlineKeyboardButton("🔄 重啟", callback_data=f"sess:restart:{s.session_id}"))
+        primary = InlineKeyboardButton(f"🔄 {label}", callback_data=f"sess:restart:{s.session_id}")
 
-    row.append(InlineKeyboardButton("📄 查看 Log", callback_data=f"sess:logs:{s.session_id}"))
-    row.append(InlineKeyboardButton("🛑 刪除", callback_data=f"sess:kill:{s.session_id}"))
-    return row
+    secondary = [
+        InlineKeyboardButton("📄 Log", callback_data=f"sess:logs:{s.session_id}"),
+        InlineKeyboardButton("🛑 刪除", callback_data=f"sess:kill:{s.session_id}"),
+    ]
+    return [[primary], secondary]
 
 
 @restricted
@@ -56,27 +66,16 @@ async def sessions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             "ℹ️ 當前沒有任何 Session。請使用 `/aoh_new` 建立新 Session。", parse_mode="Markdown"
         )
         return
-    text = "📋 *您的 CLI Agent Session 列表*:\n\n"
+    text = "📋 *Sessions* — 點 ▶️ 切換，⭐ 為當前：\n\n"
     keyboard = []
     has_offline = False
     for s in sessions:
         if not s.is_running:
             has_offline = True
-        status_icon = "🟢" if s.is_running else "🔴"
-        is_active = active_session and active_session.session_id == s.session_id
-        active_badge = " ⭐ (當前 Active)" if is_active else ""
-        text += f"{status_icon} *ID*: `{s.session_id}` | *Agent*: {s.agent_name}{active_badge}\n"
-        text += f"   📁 `{s.working_dir.name}`\n\n"
-        row = _build_session_row(s, active_session, user_id)
-        keyboard.append(row)
+        text += _session_label(s, active_session) + "\n"
+        keyboard.extend(_build_session_rows(s, active_session))
     if has_offline:
-        keyboard.append(
-            [
-                InlineKeyboardButton(
-                    "🧹 一鍵清理所有離線 Session", callback_data="sess:prune_offline"
-                )
-            ]
-        )
+        keyboard.append([InlineKeyboardButton("🧹 清理離線", callback_data="sess:prune_offline")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
 
@@ -119,26 +118,17 @@ async def session_action_callback_handler(
                 )
             else:
                 active_session = session_manager.get_active_session(user_id)
-                text = f"🧹 *已成功清理 {pruned_count} 個離線 Session！*\n\n📋 *您的 CLI Agent Session 列表*:\n\n"
+                text = f"🧹 *已清理 {pruned_count} 個！*\n\n📋 *Sessions*:\n\n"
                 keyboard = []
                 has_offline = False
                 for s in remaining:
                     if not s.is_running:
                         has_offline = True
-                    status_icon = "🟢" if s.is_running else "🔴"
-                    is_active = active_session and active_session.session_id == s.session_id
-                    active_badge = " ⭐ (當前 Active)" if is_active else ""
-                    text += f"{status_icon} *ID*: `{s.session_id}` | *Agent*: {s.agent_name}{active_badge}\n"
-                    text += f"   📁 `{s.working_dir.name}`\n\n"
-                    row = _build_session_row(s, active_session, user_id)
-                    keyboard.append(row)
+                    text += _session_label(s, active_session) + "\n"
+                    keyboard.extend(_build_session_rows(s, active_session))
                 if has_offline:
                     keyboard.append(
-                        [
-                            InlineKeyboardButton(
-                                "🧹 一鍵清理所有離線 Session", callback_data="sess:prune_offline"
-                            )
-                        ]
+                        [InlineKeyboardButton("🧹 清理離線", callback_data="sess:prune_offline")]
                     )
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(
@@ -209,12 +199,15 @@ async def session_action_callback_handler(
         if user_id in active_streamers:
             active_streamers[user_id].stop()
             del active_streamers[user_id]
-        logs = session.get_last_n_lines(n=100)
-        formatted_code = format_telegram_code_block(logs, max_chars=3700)
+        # U2: mobile-sized history (30 lines). Full context stays in the log
+        # file; /aoh_sessions → 📄 Log shows 100 on demand.
+        logs = session.get_last_n_lines(n=30)
+        formatted_code = format_telegram_code_block(logs, max_chars=2500)
         chat_id = query.message.chat_id
+        short_id = session_id.removeprefix("sess_")
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"🔄 *已切換並對接至 Session: {session.agent_name}* (`{session_id}`)\n📁 `{session.working_dir}`\n\n📄 *歷史紀錄 (最後 100 行)*:\n{formatted_code}",
+            text=f"🔄 *{session.agent_name}* · `{short_id}`\n📁 `{session.working_dir}`\n\n📄 *近 30 行*:\n{formatted_code}",
             parse_mode="Markdown",
         )
         streamer = create_streamer_for_session(context.bot, chat_id, session)

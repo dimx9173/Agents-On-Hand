@@ -18,6 +18,7 @@ class SessionRecord:
     command: str
     working_dir: str
     created_at: float
+    pid: int | None = None
 
 
 class SessionStore(Protocol):

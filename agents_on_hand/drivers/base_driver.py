@@ -105,3 +105,17 @@ class BaseDriver(ABC):
     def stop(self):
         """Stop the driver process gracefully."""
         pass
+
+    @property
+    def pid(self) -> int | None:
+        """PID of the spawned agent process, or None if not started/stopped.
+
+        Unified accessor so SessionManager can record + reap pids without
+        knowing each driver's transport (pexpect.spawn.pid,
+        asyncio.subprocess.Process.pid, acp client process.pid, etc.).
+        """
+        proc = getattr(self, "process", None)
+        if proc is None:
+            return None
+        # asyncio.subprocess.Process .pid, pexpect.spawn .pid, raw Popen .pid
+        return getattr(proc, "pid", None)

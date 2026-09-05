@@ -10,6 +10,7 @@ Locks in the optimization gains so future changes can't silently regress:
 """
 
 import asyncio
+import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -239,3 +240,125 @@ def test_s1_s2_driver_stop_cancels_monitor(tmp_path):
         assert d.is_running is False
 
     asyncio.run(_run())
+
+
+def test_pid_helpers_guards():
+    """is_pid_alive / kill_pid_safely refuse bad pids and never touch self."""
+    from agents_on_hand.process_utils import is_pid_alive, kill_pid_safely
+
+    assert is_pid_alive(None) is False
+    assert is_pid_alive(0) is False
+    assert is_pid_alive(1) is False
+    assert is_pid_alive(-5) is False
+    assert is_pid_alive(999999999) is False  # almost surely no such process
+    assert kill_pid_safely(None) is False
+    assert kill_pid_safely(1) is False
+    assert kill_pid_safely(os.getpid()) is False  # never suicide
+
+
+def test_pid_helpers_reap_real_process():
+    """kill_pid_safely actually reaps a live child (end-to-end proof)."""
+    import subprocess
+
+    from agents_on_hand.process_utils import is_pid_alive, kill_pid_safely
+
+    p = subprocess.Popen(["sleep", "60"])
+    try:
+        assert is_pid_alive(p.pid) is True
+        assert kill_pid_safely(p.pid, timeout=2.0) is True
+        p.wait(timeout=5)
+        assert is_pid_alive(p.pid) is False
+    finally:
+        try:
+            p.kill()
+        except Exception:
+            pass
+
+
+def test_stop_returns_pid_and_clears():
+    """stop() returns the pre-clear PID so callers can reap orphans."""
+    from agents_on_hand.session_manager import AgentSession
+
+    s = AgentSession.__new__(AgentSession)
+    s.is_running = True
+    s.driver = MagicMock()
+    s._log_buffer = []
+    s.flush_log_buffer = MagicMock()
+    s.trace = MagicMock()
+    s.agent_pid = 12345
+    assert s.stop() == 12345
+    assert s.agent_pid is None
+
+
+@pytest.mark.asyncio
+async def test_kill_session_reaps_stale_pid(tmp_path):
+    """kill_session reaps a process that outlived driver.stop()."""
+    from agents_on_hand.session_manager import SessionManager
+
+    mgr = SessionManager(store_path=tmp_path / "s.json")
+    with patch("agents_on_hand.session_manager.AgentSession.start", new_callable=AsyncMock):
+        s = mgr.create_session(user_id=1, agent_key="bash", working_dir=tmp_path)
+    # Simulate: driver died but OS process survived with a known PID
+    fake_proc = MagicMock()
+    fake_proc.pid = 424242
+    s.driver = MagicMock()
+    s.driver.pid = None  # driver object lost track of it
+    s.agent_pid = 424242
+    with (
+        patch("agents_on_hand.session_manager.kill_pid_safely") as mk,
+        patch("agents_on_hand.session_manager.SessionManager._save_to_store"),
+    ):
+        assert mgr.kill_session(s.session_id) is True
+        mk.assert_called_once_with(424242)
+    assert mgr.get_session(s.session_id) is None
+
+
+@pytest.mark.asyncio
+async def test_kill_session_no_pid_no_reap(tmp_path):
+    """kill_session without a recorded PID must not call the reaper."""
+    from agents_on_hand.session_manager import SessionManager
+
+    mgr = SessionManager(store_path=tmp_path / "s.json")
+    with patch("agents_on_hand.session_manager.AgentSession.start", new_callable=AsyncMock):
+        s = mgr.create_session(user_id=1, agent_key="bash", working_dir=tmp_path)
+    s.agent_pid = None
+    with (
+        patch("agents_on_hand.session_manager.kill_pid_safely") as mk,
+        patch("agents_on_hand.session_manager.SessionManager._save_to_store"),
+    ):
+        assert mgr.kill_session(s.session_id) is True
+        mk.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_load_restores_live_pid_only(tmp_path):
+    """State reload keeps the PID only if the process still exists."""
+    from agents_on_hand.session_manager import SessionManager
+
+    mgr = SessionManager(store_path=tmp_path / "s.json")
+    with patch("agents_on_hand.session_manager.AgentSession.start", new_callable=AsyncMock):
+        s = mgr.create_session(user_id=1, agent_key="bash", working_dir=tmp_path)
+    s.agent_pid = 999999999  # dead PID
+    mgr._save_to_store()
+    mgr2 = SessionManager(store_path=tmp_path / "s.json")
+    assert mgr2.get_session(s.session_id).agent_pid is None
+
+
+def test_session_record_pid_roundtrip(tmp_path):
+    """SessionRecord persists the PID through save/load."""
+    from agents_on_hand.session_store import JSONSessionStore, SessionRecord
+
+    store = JSONSessionStore(tmp_path / "state.json")
+    rec = SessionRecord(
+        session_id="sess_pid",
+        user_id=1,
+        agent_key="bash",
+        agent_name="Bash",
+        command="bash",
+        working_dir="/tmp",
+        created_at=1.0,
+        pid=7777,
+    )
+    store.save_state([rec], {1: "sess_pid"})
+    loaded, _ = store.load_state()
+    assert loaded[0].pid == 7777

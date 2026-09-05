@@ -58,6 +58,68 @@ def is_process_alive(proc: Any) -> bool:
     return True
 
 
+def is_pid_alive(pid: int | None) -> bool:
+    """Check whether a raw OS PID currently exists (kill-0 probe, no signal sent)."""
+    if not isinstance(pid, int) or pid <= 1:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by another user
+    except Exception:
+        return False
+
+
+def kill_pid_safely(pid: int | None, timeout: float = 0.5) -> bool:
+    """SIGTERM-then-SIGKILL a raw PID with the same guards as kill_process_tree.
+
+    Used to reap orphaned agent processes whose driver object is already gone
+    (session deleted after a crash, stale state.json record). Returns True if
+    a signal was delivered, False if there was nothing to kill.
+    Guards: pid must be > 1, not ourselves, and its pgid must exist, be > 1,
+    and differ from our own process group (PID-reuse protection).
+    """
+    if not isinstance(pid, int) or pid <= 1:
+        return False
+    if pid == os.getpid():
+        return False
+    try:
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, PermissionError):
+        return False
+    except Exception:
+        return False
+    # System/root process groups must never be signalled (PID-reuse guard).
+    if pgid <= 1:
+        return False
+    # NOTE: unlike kill_process_tree's killpg path, a raw PID kill only ever
+    # signals the single pid — never the group — so sharing our pgid is fine
+    # (normal case: agent child spawned without setpgrp). killpg is untouched.
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        return False
+    except Exception:
+        return False
+    import time as _time
+
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        if not is_pid_alive(pid):
+            return True
+        _time.sleep(0.05)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    except Exception:
+        pass
+    return True
+
+
 def kill_process_tree(proc: Any, timeout: float = 0.5) -> None:
     """
     Safely terminates a subprocess and its entire child process tree.

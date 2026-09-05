@@ -186,6 +186,12 @@ class ACPDriver(BaseDriver):
         if self.client:
             await self.client.respond_to_permission(request_id, approved)
 
+    @property
+    def pid(self) -> int | None:
+        """ACPDriver wraps its process in the ACPClient."""
+        proc = getattr(self.client, "process", None)
+        return getattr(proc, "pid", None)
+
     def stop(self):
         """Terminate the ACP subprocess and its tree (idempotent)."""
         self.is_running = False

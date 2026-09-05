@@ -22,6 +22,7 @@ from .drivers import (
     PTYDriver,
 )
 from .logging_setup import SessionTraceLogger
+from .process_utils import is_pid_alive, kill_pid_safely
 from .session_store import JSONSessionStore, SessionRecord
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,11 @@ class AgentSession:
         # "background response complete" notification.
         self._bg_completion_callback: Callable[[AgentSession], None] | None = None
 
+        # OS PID of the spawned agent process (recorded on driver bind).
+        # Persisted so a crash/restart can reap a stale/orphaned process
+        # left behind by a previous bot lifecycle.
+        self.agent_pid: int | None = None
+
     @property
     def is_acp(self) -> bool:
         """Return True if using a structured protocol (ACP, Pi RPC, Claude Stream)."""
@@ -135,6 +141,8 @@ class AgentSession:
                     self.driver = candidate_driver
                     self.active_driver_name = driver_name
                     self.is_running = True
+                    # Record OS PID for orphan-reaping on session delete.
+                    self.agent_pid = candidate_driver.pid
                     for cb in list(self._listeners):
                         self._attach_listener_to_driver(cb)
                     logger.info(
@@ -168,6 +176,7 @@ class AgentSession:
                 self.driver = pty
                 self.active_driver_name = "pty"
                 self.is_running = True
+                self.agent_pid = pty.pid
                 for cb in list(self._listeners):
                     self._attach_listener_to_driver(cb)
                 self.trace.driver_bound("pty", True)
@@ -316,8 +325,14 @@ class AgentSession:
         if self.driver:
             self.driver.unregister_listener(callback)
 
-    def stop(self):
-        """Stop active session and driver."""
+    def stop(self) -> int | None:
+        """Stop active session and driver.
+
+        Returns the agent PID *before* clearing it, so callers
+        (kill_session / prune / shutdown) can reap a process that
+        outlived driver.stop() — without this the orphan-kill below
+        would always see None (dead code).
+        """
         self.is_running = False
         self.flush_log_buffer()
         if self.driver:
@@ -327,6 +342,9 @@ class AgentSession:
             self.trace.close()
         except Exception:
             pass
+        stale_pid = self.agent_pid
+        self.agent_pid = None
+        return stale_pid
 
     def get_last_n_lines(self, n: int = 100) -> str:
         """Read last N lines from log file (tail-seek, O(window) not O(file))."""
@@ -385,6 +403,7 @@ class SessionManager:
             command=s.command,
             working_dir=str(s.working_dir),
             created_at=s.created_at,
+            pid=s.agent_pid,
         )
 
     def _save_to_store(self) -> None:
@@ -409,6 +428,11 @@ class SessionManager:
                 )
                 s.is_running = False
                 s.created_at = r.created_at
+                stale_pid: int | None = getattr(r, "pid", None)
+                # A stale PID from a previous bot lifecycle may already be dead
+                # (or worse, recycled). Only keep it if the process still exists;
+                # kill_session/prune reap it via kill_pid_safely (pgid-guarded).
+                s.agent_pid = stale_pid if is_pid_alive(stale_pid) else None
                 self.sessions[r.session_id] = s
             for uid, sid in active.items():
                 if sid in self.sessions:
@@ -487,7 +511,9 @@ class SessionManager:
     def kill_session(self, session_id: str) -> bool:
         session = self.sessions.get(session_id)
         if session:
-            session.stop()
+            stale_pid = session.stop()
+            if stale_pid is not None:
+                kill_pid_safely(stale_pid)
             del self.sessions[session_id]
             for uid, active_sid in list(self.user_active_session.items()):
                 if active_sid == session_id:
@@ -508,7 +534,9 @@ class SessionManager:
         for sid in offline_ids:
             s = self.sessions.pop(sid, None)
             if s:
-                s.stop()
+                stale_pid = s.stop()
+                if stale_pid is not None:
+                    kill_pid_safely(stale_pid)
                 count += 1
             if self.user_active_session.get(user_id) == sid:
                 del self.user_active_session[user_id]
@@ -522,7 +550,9 @@ class SessionManager:
         for session in list(self.sessions.values()):
             if session.is_running:
                 try:
-                    session.stop()
+                    stale_pid = session.stop()
+                    if stale_pid is not None:
+                        kill_pid_safely(stale_pid)
                     count += 1
                 except Exception as e:
                     logger.error(

@@ -22,6 +22,8 @@ from .handlers.restart import on_background_session_finished, session_restart_ca
 from .runtime import active_streamers, bot_app, create_streamer_for_session
 from .security import restricted
 from .ui.directory_browser import (
+    agent_reuse_callback_handler,
+    agent_start_callback_handler,
     directory_callback_handler,
     new_command,
 )
@@ -49,6 +51,8 @@ __all__ = [
     "esc_command",
     "ctrlc_command",
     "stop_command",
+    "agent_reuse_callback_handler",
+    "agent_start_callback_handler",
     "directory_callback_handler",
     "session_action_callback_handler",
     "acp_permission_callback_handler",

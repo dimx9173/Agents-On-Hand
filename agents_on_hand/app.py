@@ -22,7 +22,12 @@ from .handlers.chat import (
 )
 from .handlers.restart import session_restart_callback_handler
 from .session_manager import session_manager
-from .ui.directory_browser import directory_callback_handler, new_command
+from .ui.directory_browser import (
+    agent_reuse_callback_handler,
+    agent_start_callback_handler,
+    directory_callback_handler,
+    new_command,
+)
 from .ui.session_menu import prune_command, session_action_callback_handler, sessions_command
 
 logger = logging.getLogger("AgentsOnHand")
@@ -126,9 +131,10 @@ def main() -> None:
     app.add_handler(CommandHandler("aoh_ctrlc", ctrlc_command))
     app.add_handler(CommandHandler("aoh_stop", stop_command))
     app.add_handler(CallbackQueryHandler(directory_callback_handler, pattern=r"^dir:"))
-    from .ui.directory_browser import agent_start_callback_handler
-
-    app.add_handler(CallbackQueryHandler(agent_start_callback_handler, pattern=r"^agent:"))
+    app.add_handler(
+        CallbackQueryHandler(agent_start_callback_handler, pattern=r"^agent:(start|force_new):")
+    )
+    app.add_handler(CallbackQueryHandler(agent_reuse_callback_handler, pattern=r"^agent:reuse:"))
     app.add_handler(CallbackQueryHandler(session_action_callback_handler, pattern=r"^sess:"))
     app.add_handler(CallbackQueryHandler(acp_permission_callback_handler, pattern=r"^acp_perm:"))
     app.add_handler(

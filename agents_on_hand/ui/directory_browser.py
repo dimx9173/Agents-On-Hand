@@ -4,6 +4,7 @@ from pathlib import Path
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from ..ansi_cleaner import format_telegram_code_block
 from ..callback_registry import get_path_token, resolve_path_token
 from ..config import (
     ALLOWED_ROOT_DIRS,
@@ -239,6 +240,20 @@ async def agent_start_callback_handler(update, context):  # type: ignore[no-unty
     parts = data.split(":", 3)
     if len(parts) < 4:
         return
+    subaction = parts[1]
+    if subaction == "force_new":
+        # User explicitly chose a fresh session from the reuse prompt.
+        path_token, agent_key = parts[2], parts[3]
+        working_dir = resolve_path_token(path_token)
+        if working_dir is None or not is_path_allowed(working_dir):
+            await query.edit_message_text(
+                "⛔ *無法啟動*：工作目錄無效或超出允許範圍。", parse_mode="Markdown"
+            )
+            return
+        await _launch_new_session(query, context, user_id, agent_key, working_dir)
+        return
+    if subaction != "start":
+        return
     path_token, agent_key = parts[2], parts[3]
     working_dir = resolve_path_token(path_token)
     # Defense-in-depth: re-validate the resolved path before spawning a process
@@ -247,6 +262,44 @@ async def agent_start_callback_handler(update, context):  # type: ignore[no-unty
             "⛔ *無法啟動*：工作目錄無效或超出允許範圍。", parse_mode="Markdown"
         )
         return
+    # PRP reuse: same user + agent + directory already running → offer to
+    # attach instead of stranding the old process (orphan) and splitting context.
+    existing = session_manager.find_running_session(
+        user_id=user_id, agent_key=agent_key, working_dir=working_dir
+    )
+    if existing is not None:
+        short_id = existing.session_id.removeprefix("sess_")
+        dir_token = get_path_token(working_dir)
+        await query.edit_message_text(
+            f"🔁 *此目錄已有運作中的 {existing.agent_name}*\n"
+            f"📁 `{working_dir}`\n`ID: {existing.session_id}`\n\n"
+            "要沿用它（保留對話上下文），還是另外開一個？",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            f"🔁 沿用 · `{short_id}`",
+                            callback_data=f"agent:reuse:{existing.session_id}",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            "🆕 另外開一個",
+                            callback_data=f"agent:force_new:{dir_token}:{agent_key}",
+                        )
+                    ],
+                ]
+            ),
+        )
+        return
+    await _launch_new_session(query, context, user_id, agent_key, working_dir)
+
+
+async def _launch_new_session(
+    query, context, user_id: int, agent_key: str, working_dir: Path
+) -> None:  # type: ignore[no-untyped-def]
+    """Shared create-and-attach flow (agent:start: + agent:force_new:)."""
     if user_id in active_streamers:
         active_streamers[user_id].stop()
         del active_streamers[user_id]
@@ -261,6 +314,45 @@ async def agent_start_callback_handler(update, context):  # type: ignore[no-unty
     await context.bot.send_message(
         chat_id=chat_id,
         text=f"💬 *已對接 Active Session: {session.agent_name}* (`{session.session_id}`)\n📁 `{working_dir}`\n\n現在可直接打字或傳送指令與 Agent 對話！",
+        parse_mode="Markdown",
+    )
+    streamer = create_streamer_for_session(context.bot, chat_id, session)
+    streamer.start()
+    active_streamers[user_id] = streamer
+
+
+async def agent_reuse_callback_handler(update, context):  # type: ignore[no-untyped-def]
+    """Attach to the running session selected in the reuse prompt."""
+
+    query = update.callback_query
+    await query.answer()
+    parts = (query.data or "").split(":")
+    if len(parts) < 3:
+        return
+    user_id = query.from_user.id
+    session_id = parts[2]
+    session = session_manager.get_session(session_id)
+    if session is None or session.user_id != user_id or not session.is_running:
+        await query.edit_message_text(
+            "⚠️ 該 Session 已不存在或離線，請重新選擇。",
+            parse_mode="Markdown",
+        )
+        return
+    session_manager.set_active_session(user_id, session_id)
+    if user_id in active_streamers:
+        active_streamers[user_id].stop()
+        del active_streamers[user_id]
+    logs = session.get_last_n_lines(n=30)
+    formatted_code = format_telegram_code_block(logs, max_chars=2500)
+    chat_id = query.message.chat_id
+    short_id = session_id.removeprefix("sess_")
+    await query.edit_message_text(
+        f"🔁 *已沿用 Session: {session.agent_name}* · `{short_id}`\n📁 `{session.working_dir}`",
+        parse_mode="Markdown",
+    )
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"💬 *已對接 Active Session: {session.agent_name}* (`{session_id}`)\n📁 `{session.working_dir}`\n\n📄 *近 30 行*:\n{formatted_code}\n\n現在可直接打字或傳送指令與 Agent 對話！",
         parse_mode="Markdown",
     )
     streamer = create_streamer_for_session(context.bot, chat_id, session)

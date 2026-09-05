@@ -492,6 +492,33 @@ class SessionManager:
     def get_session(self, session_id: str) -> AgentSession | None:
         return self.sessions.get(session_id)
 
+    def find_running_session(
+        self, user_id: int, agent_key: str, working_dir: Path
+    ) -> AgentSession | None:
+        """Find the user's running session for the same agent + directory.
+
+        PRP reuse: starting an agent in a directory that already has a live
+        session would strand the old process (orphan) and split conversation
+        context. Callers check this *before* create_session and offer to
+        attach instead. Returns the most recently created match, else None.
+        """
+        try:
+            target = working_dir.expanduser().resolve()
+        except Exception:
+            return None
+        best: AgentSession | None = None
+        for s in self.sessions.values():
+            if s.user_id != user_id or s.agent_key != agent_key or not s.is_running:
+                continue
+            try:
+                if s.working_dir.expanduser().resolve() != target:
+                    continue
+            except Exception:
+                continue
+            if best is None or s.created_at > best.created_at:
+                best = s
+        return best
+
     def get_active_session(self, user_id: int) -> AgentSession | None:
         active_id = self.user_active_session.get(user_id)
         if active_id and active_id in self.sessions:

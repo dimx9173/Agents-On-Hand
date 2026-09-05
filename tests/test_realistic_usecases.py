@@ -69,6 +69,7 @@ async def test_journey_new_session_via_directory_browser(tmp_path):
     ):
         mock_sess = _make_mock_session("sess_new", "Bash", True)
         sm.create_session.return_value = mock_sess
+        sm.find_running_session.return_value = None  # no reuse candidate → create
         q2 = MagicMock()
         q2.answer = AsyncMock()
         q2.edit_message_text = AsyncMock()

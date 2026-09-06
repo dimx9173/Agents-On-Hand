@@ -1,14 +1,21 @@
 import asyncio
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from ..ansi_cleaner import format_telegram_code_block
+from ..callback_registry import get_path_token
 from ..runtime import active_streamers, bot_app, create_streamer_for_session
 from ..security import restricted
 from ..session_manager import session_manager
+from ..ui.directory_browser import (
+    _list_external_omp_sessions,
+    _list_external_opencode_sessions,
+    _list_external_prime_sessions,
+)
 
 if TYPE_CHECKING:
     from ..session_manager import AgentSession
@@ -56,28 +63,177 @@ def _build_session_rows(
     return [[primary], secondary]
 
 
+def _agent_display_name(agent_key: str) -> str:
+    """Display name for an agent key, falling back to the key itself."""
+    from ..config import AVAILABLE_CLI_AGENTS
+
+    return str(AVAILABLE_CLI_AGENTS.get(agent_key, {}).get("name", agent_key))
+
+
+def _build_agent_list_view(
+    user_id: int, note: str = "",
+) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Step-1 view: one button per distinct agent_key with a running/total badge.
+
+    Returns (text, markup); markup is None when there are no sessions at all —
+    callers then show the plain empty-state message.
+    """
+    sessions = session_manager.list_user_sessions(user_id)
+    if not sessions:
+        return ("ℹ️ 當前沒有任何 Session。請使用 `/aoh_new` 建立新 Session。", None)
+    order: list[str] = []
+    grouped: dict[str, list[AgentSession]] = {}
+    for s in sessions:
+        if s.agent_key not in grouped:
+            grouped[s.agent_key] = []
+            order.append(s.agent_key)
+        grouped[s.agent_key].append(s)
+    lines: list[str] = []
+    if note:
+        lines.append(note)
+    lines.append("🎛 *管理 Session* — 選擇 Agent：")
+    lines.append("")
+    keyboard: list[list[InlineKeyboardButton]] = []
+    has_offline = False
+    for agent_key in order:
+        group = grouped[agent_key]
+        running = sum(1 for s in group if s.is_running)
+        if running < len(group):
+            has_offline = True
+        name = _agent_display_name(agent_key)
+        badge = f"🟢{running}/{len(group)}"
+        lines.append(f"• {name} · {badge}")
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    f"🤖 {name} · {badge}", callback_data=f"sess:agent:{agent_key}"
+                )
+            ]
+        )
+    if has_offline:
+        keyboard.append([InlineKeyboardButton("🧹 清理離線", callback_data="sess:prune_offline")])
+    return ("\n".join(lines), InlineKeyboardMarkup(keyboard))
+
+
+async def _list_external_sessions(
+    agent_key: str, agent_sessions: list["AgentSession"],
+) -> list[tuple[Path, dict]]:
+    """External (non-AOH) running sessions across the agent's working dirs."""
+    fns: dict[str, Any] = {
+        "opencode": _list_external_opencode_sessions,
+        "omp": _list_external_omp_sessions,
+        "prime": _list_external_prime_sessions,
+    }
+    list_fn = fns.get(agent_key)
+    if list_fn is None:
+        return []
+    dirs: list[Path] = []
+    seen_dirs: set[str] = set()
+    for s in agent_sessions:
+        key = str(s.working_dir)
+        if key not in seen_dirs:
+            seen_dirs.add(key)
+            dirs.append(s.working_dir)
+    out: list[tuple[Path, dict]] = []
+    for working_dir in dirs:
+        try:
+            found = await list_fn(working_dir)
+        except Exception as e:
+            logger.debug(f"external {agent_key} session list failed: {e}")
+            found = []
+        for ext in found:
+            if ext.get("id"):
+                out.append((working_dir, ext))
+    return out
+
+
+def _external_row(ext_kind: str, ext: dict) -> tuple[str, str] | None:
+    """Button label + text detail for one external session (mirrors _show_instance_picker)."""
+    ext_id = str(ext.get("id", ""))
+    if not ext_id:
+        return None
+    if ext_kind in ("opencode", "omp"):
+        title = str(ext.get("title", "") or "").strip().replace("\n", " ")
+        if len(title) > 24:
+            title = title[:24] + "…"
+        short = ext_id[4:12] if ext_id.startswith("ses_") else ext_id[:8]
+        label = f"🟣 {short}"
+        detail = f"• 🟣 `{short}`"
+        if title and not title.startswith("New session"):
+            label = f"{label} · {title}"
+            detail = f"{detail} · {title}"
+        return label, detail
+    first = str(ext.get("firstMessage", "") or "").strip().replace("\n", " ")
+    if len(first) > 22:
+        first = first[:22] + "…"
+    activity = str(ext.get("activity", "") or "")
+    act_badge = f" · {activity}" if activity and activity != "working" else ""
+    name = str(ext.get("sessionName", "") or "")
+    name_badge = f" · {name}" if name else ""
+    label = f"🟣 {ext_id[:8]}{act_badge}{name_badge}"
+    detail = f"• 🟣 `{ext_id[:8]}`{act_badge}{name_badge}"
+    if first:
+        label = f"{label} · {first}"
+        detail = f"{detail} · {first}"
+    return label, detail
+
+
+async def _build_agent_sessions_view(
+    user_id: int, agent_key: str,
+) -> tuple[str, InlineKeyboardMarkup]:
+    """Step-2 view: one agent's AOH sessions + external running sessions."""
+    sessions = session_manager.list_user_sessions(user_id)
+    agent_sessions = [s for s in sessions if s.agent_key == agent_key]
+    active_session = session_manager.get_active_session(user_id)
+    agent_name = _agent_display_name(agent_key)
+    ordered = [s for s in agent_sessions if s.is_running] + [
+        s for s in agent_sessions if not s.is_running
+    ]
+    externals = await _list_external_sessions(agent_key, agent_sessions)
+    lines = [f"🤖 *{agent_name}* · Sessions：", ""]
+    keyboard: list[list[InlineKeyboardButton]] = []
+    for s in ordered:
+        lines.append(_session_label(s, active_session))
+        keyboard.extend(_build_session_rows(s, active_session))
+    if externals:
+        lines.append("（🟣 為外部 session，點選即接回）")
+        for working_dir, ext in externals:
+            row = _external_row(agent_key, ext)
+            if row is None:
+                continue
+            label, detail = row
+            lines.append(detail)
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        label[:64],
+                        callback_data=(
+                            f"agent:attach_ext:{get_path_token(working_dir)}:{agent_key}:{ext.get('id')}"
+                        ),
+                    )
+                ]
+            )
+    has_offline = any(not s.is_running for s in agent_sessions)
+    if has_offline:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    "🧹 清理離線", callback_data=f"sess:prune_offline:{agent_key}"
+                )
+            ]
+        )
+    keyboard.append([InlineKeyboardButton("⬅️ 返回 Agent 列表", callback_data="sess:back")])
+    return ("\n".join(lines), InlineKeyboardMarkup(keyboard))
+
+
 @restricted
 async def sessions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
-    sessions = session_manager.list_user_sessions(user_id)
-    active_session = session_manager.get_active_session(user_id)
-    if not sessions:
-        await update.message.reply_text(
-            "ℹ️ 當前沒有任何 Session。請使用 `/aoh_new` 建立新 Session。", parse_mode="Markdown"
-        )
-        return
-    text = "📋 *Sessions* — 點 ▶️ 切換，⭐ 為當前：\n\n"
-    keyboard = []
-    has_offline = False
-    for s in sessions:
-        if not s.is_running:
-            has_offline = True
-        text += _session_label(s, active_session) + "\n"
-        keyboard.extend(_build_session_rows(s, active_session))
-    if has_offline:
-        keyboard.append([InlineKeyboardButton("🧹 清理離線", callback_data="sess:prune_offline")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+    text, markup = _build_agent_list_view(user_id)
+    if markup is None:
+        await update.message.reply_text(text, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=markup)
 
 
 @restricted
@@ -108,6 +264,7 @@ async def session_action_callback_handler(
     logger.info(f"[TG_CB] user={user_id} action={action} session={session_id} data={data}")
 
     if action == "prune_offline":
+        prune_agent = parts[2] if len(parts) > 2 else ""
         pruned_count = session_manager.prune_offline_sessions(user_id)
         if pruned_count > 0:
             remaining = session_manager.list_user_sessions(user_id)
@@ -116,26 +273,36 @@ async def session_action_callback_handler(
                     f"🧹 *已成功清理 {pruned_count} 個離線 Session！*\n\n當前已無任何 Session，可使用 `/aoh_new` 建立新 Session。",
                     parse_mode="Markdown",
                 )
-            else:
-                active_session = session_manager.get_active_session(user_id)
-                text = f"🧹 *已清理 {pruned_count} 個！*\n\n📋 *Sessions*:\n\n"
-                keyboard = []
-                has_offline = False
-                for s in remaining:
-                    if not s.is_running:
-                        has_offline = True
-                    text += _session_label(s, active_session) + "\n"
-                    keyboard.extend(_build_session_rows(s, active_session))
-                if has_offline:
-                    keyboard.append(
-                        [InlineKeyboardButton("🧹 清理離線", callback_data="sess:prune_offline")]
-                    )
-                reply_markup = InlineKeyboardMarkup(keyboard)
+            elif prune_agent:
+                text, markup = await _build_agent_sessions_view(user_id, prune_agent)
                 await query.edit_message_text(
-                    text, parse_mode="Markdown", reply_markup=reply_markup
+                    text, parse_mode="Markdown", reply_markup=markup
+                )
+            else:
+                list_text, list_markup = _build_agent_list_view(
+                    user_id, note=f"🧹 *已清理 {pruned_count} 個！*"
+                )
+                await query.edit_message_text(
+                    list_text, parse_mode="Markdown", reply_markup=list_markup
                 )
         else:
             await query.answer("ℹ️ 目前沒有任何離線 Session 需要清理。", show_alert=True)
+        return
+
+    if action == "agent":
+        # Step 2: sessions for the chosen agent (AOH + external running ones).
+        text, markup = await _build_agent_sessions_view(user_id, session_id)
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=markup)
+        return
+
+    if action == "back":
+        list_text, list_markup = _build_agent_list_view(user_id)
+        if list_markup is None:
+            await query.edit_message_text(list_text, parse_mode="Markdown")
+        else:
+            await query.edit_message_text(
+                list_text, parse_mode="Markdown", reply_markup=list_markup
+            )
         return
 
     session = session_manager.get_session(session_id)

@@ -2,7 +2,7 @@
 
 - U1: compact 2-line session rows (primary carries context, kill always last)
 - U2: switch history trimmed to 30 lines / 2500 chars
-- U3: /aoh_new jumps straight to the agent picker (+ shared picker builder)
+- U3: /aoh_new opens the directory browser first, then the agent picker (+ shared picker builder)
 - U4: directory browser shows recent-dirs shortcuts
 - U5: tool approval card shows full args with compact buttons
 - U6: wait indicator is a live status line (elapsed + tools)
@@ -14,31 +14,38 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
-def _mock_session(sid="sess_x", agent_name="Bash", running=True, workdir="/tmp/myproj"):
+def _mock_session(sid="sess_x", agent_name="Bash", running=True, workdir="/tmp/myproj",
+                 agent_key="bash"):
     s = MagicMock()
     s.session_id = sid
     s.agent_name = agent_name
+    s.agent_key = agent_key
     s.working_dir = Path(workdir)
     s.is_running = running
     s.get_last_n_lines = MagicMock(return_value="l1\nl2")
     return s
 
 
-def _撐起_sessions_ui(user_id=1, sessions=None, active=None):
-    """Run sessions_command and return (text, buttons)."""
-    from agents_on_hand.ui.session_menu import sessions_command
+def _撐起_agent_sessions_ui(user_id=1, sessions=None, active=None, agent_key="bash"):
+    """Run the Step-2 agent-session view via `sess:agent:` callback; return (text, buttons)."""
+    from agents_on_hand.ui.session_menu import session_action_callback_handler
 
     async def _run():
-        with patch("agents_on_hand.ui.session_menu.session_manager") as sm:
+        with (
+            patch("agents_on_hand.ui.session_menu.session_manager") as sm,
+            patch("agents_on_hand.security.is_user_allowed", return_value=True),
+        ):
             sm.list_user_sessions.return_value = sessions
             sm.get_active_session.return_value = active
+            q = MagicMock()
+            q.answer = AsyncMock()
+            q.edit_message_text = AsyncMock()
+            q.data = f"sess:agent:{agent_key}"
+            q.from_user = MagicMock(id=user_id)
             update = MagicMock()
-            update.effective_user = MagicMock(id=user_id)
-            update.message = MagicMock()
-            update.message.reply_text = AsyncMock()
-            with patch("agents_on_hand.security.is_user_allowed", return_value=True):
-                await sessions_command(update, MagicMock())
-            return update.message.reply_text.call_args
+            update.callback_query = q
+            await session_action_callback_handler(update, MagicMock())
+            return q.edit_message_text.call_args
 
     call = asyncio.run(_run())
     txt = call[0][0]
@@ -48,14 +55,14 @@ def _撐起_sessions_ui(user_id=1, sessions=None, active=None):
 
 
 def test_u1_compact_rows_two_lines_per_session():
-    s1 = _mock_session("sess_a", "Claude", True)
-    s2 = _mock_session("sess_b", "Bash", False)
-    txt, btns = _撐起_sessions_ui(sessions=[s1, s2], active=None)
-    # One text line per session (was 3 lines: ID + folder + blank)
-    assert "sess_a" not in txt  # full id gone from text; short id in buttons
-    assert "Claude" in txt and "Bash" in txt
-    # 3 buttons per session (primary + log + kill) + prune row (s2 offline)
-    assert len(btns) == 3 * 2 + 1
+    s1 = _mock_session("sess_a", "Bash", True, agent_key="bash")
+    s2 = _mock_session("sess_b", "Bash", False, agent_key="bash")
+    txt, btns = _撐起_agent_sessions_ui(sessions=[s1, s2], active=None)
+    # Step-2 agent view: one text line per session (short ids only in buttons)
+    assert "sess_a" not in txt and "sess_b" not in txt
+    assert "Bash Shell" in txt
+    # 3 buttons per session (primary + log + kill) + prune + back rows
+    assert len(btns) == 3 * 2 + 2
     # Primary buttons carry context; kill always last in secondary row
     assert any(b.text.startswith("▶️ ") for b in btns)
     assert any(b.text.startswith("🔄 ") for b in btns)
@@ -63,12 +70,13 @@ def test_u1_compact_rows_two_lines_per_session():
 
 def test_u1_active_session_primary_opens_log():
     """Active session's primary button must not be a dead sess:pause (no handler)."""
-    s1 = _mock_session("sess_a", "Claude", True)
-    _txt, btns = _撐起_sessions_ui(sessions=[s1], active=s1)
+    s1 = _mock_session("sess_a", "Bash", True, agent_key="bash")
+    _txt, btns = _撐起_agent_sessions_ui(sessions=[s1], active=s1)
     assert not any((b.callback_data or "").startswith("sess:pause:") for b in btns), (
         "sess:pause has no handler — must not be emitted"
     )
-    assert any(b.text.startswith("⭐ ") for b in btns)
+    active_primary = next(b for b in btns if b.text.startswith("⭐ "))
+    assert active_primary.callback_data.startswith("sess:logs:")
 
 
 def test_u2_switch_history_trimmed():
@@ -79,7 +87,7 @@ def test_u2_switch_history_trimmed():
     assert "max_chars=2500" in src
 
 
-def test_u3_new_command_goes_straight_to_picker():
+def test_u3_new_command_goes_to_directory_browser_first():
     from agents_on_hand.ui.directory_browser import new_command
 
     async def _run():
@@ -91,8 +99,12 @@ def test_u3_new_command_goes_straight_to_picker():
         with (
             patch("agents_on_hand.security.is_user_allowed", return_value=True),
             patch(
-                "agents_on_hand.ui.directory_browser.get_installed_cli_agents",
-                return_value={"bash": {"name": "Bash", "use_acp": False}},
+                "agents_on_hand.ui.directory_browser.ALLOWED_ROOT_DIRS",
+                [Path("/tmp")],
+            ),
+            patch(
+                "agents_on_hand.ui.directory_browser.is_path_allowed",
+                return_value=True,
             ),
         ):
             await new_command(update, MagicMock())
@@ -101,8 +113,9 @@ def test_u3_new_command_goes_straight_to_picker():
     call = asyncio.run(_run())
     markup = call[1].get("reply_markup")
     btns = [b for row in markup.inline_keyboard for b in row]
-    assert any((b.callback_data or "").startswith("agent:start:") for b in btns)
-    assert any((b.callback_data or "").startswith("dir:nav:") for b in btns)
+    # Directory browser first: must offer ✅ select-dir, must NOT pre-select agents
+    assert any((b.callback_data or "").startswith("dir:select:") for b in btns)
+    assert not any((b.callback_data or "").startswith("agent:start:") for b in btns)
 
 
 def test_u3_picker_builder_shared():

@@ -46,6 +46,32 @@ def _strip_html_tags(text: str) -> str:
     )
 
 
+# Degeneration-loop guard: when an agent (e.g. prime-agent) repeats the same
+# acknowledgement sentence over and over without doing work, interrupt once.
+_LOOP_REPEAT_THRESHOLD = 6  # 同一句子重複達此數視為 loop
+_LOOP_MIN_SENTENCE_CHARS = 6  # 少於此長度的句子不列入統計
+
+
+def _detect_repetition_loop(text: str) -> str | None:
+    """Return a repeated sentence when `text` shows a degeneration loop.
+
+    Splits on CJK/ASCII sentence terminators + newlines, counts identical
+    sentences, and returns the SHORTEST repeated one. prime-agent ack loops
+    repeat a closing fragment like「我來完成這個調整。」while the lead-in
+    wording varies — the fragment is its own split unit so it is caught.
+    """
+    if not text or len(text) < 200:
+        return None
+    sentences = [s.strip() for s in re.split(r"[。！？!?\n]+", text) if s.strip()]
+    counts: dict[str, int] = {}
+    for s in sentences:
+        if len(s) >= _LOOP_MIN_SENTENCE_CHARS:
+            counts[s] = counts.get(s, 0) + 1
+    repeated = [s for s, c in counts.items() if c >= _LOOP_REPEAT_THRESHOLD]
+    if not repeated:
+        return None
+    return min(repeated, key=len)
+
 class UnifiedStreamer:
     """
     Unified Live Streamer for all Agent Sessions and Protocols.
@@ -89,9 +115,9 @@ class UnifiedStreamer:
         # Dirty-flag: set by _on_driver_event, cleared on flush. Lets idle
         # throttle ticks skip render + split + edit entirely.
         self._dirty: bool = False
-        # Monotonic counter of delivered chunks; a new chunk (pagination)
-        # forces delivery even if the first chunk text is unchanged.
         self._delivered_chunks: int = 0
+        # Degeneration-loop alert sent once per turn (prevents ESC spam).
+        self._loop_alert_sent: bool = False
 
     @property
     def current_msg_id(self) -> int | None:
@@ -163,6 +189,7 @@ class UnifiedStreamer:
         self._dirty = False
         self._is_turn_final = False
         self._pending_tool_req_ids.clear()
+        self._loop_alert_sent = False
         self._cancel_wait_indicator()
 
         try:
@@ -245,6 +272,7 @@ class UnifiedStreamer:
                 f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=TEXT_DELTA +{len(event.content)} chars total={len(self.current_text)}"
             )
             asyncio.create_task(self._schedule_edit())
+            self._check_repetition_loop()
 
         elif e_type == DriverEvent.THOUGHT_DELTA:
             self.current_thought += event.content
@@ -285,6 +313,40 @@ class UnifiedStreamer:
             self._dirty = True
             self._stop_typing()
             asyncio.create_task(self._schedule_edit())
+
+    def _check_repetition_loop(self) -> None:
+        """Detect a degeneration loop (repeated ack sentence) and interrupt once."""
+        if self._loop_alert_sent or self._is_turn_final or not self.current_text:
+            return
+        phrase = _detect_repetition_loop(self.current_text)
+        if phrase is None:
+            return
+        self._loop_alert_sent = True
+        session_id = getattr(self.session, "session_id", "?")
+        logger.warning(
+            f"[LOOP_DETECT] session={session_id} repeated={phrase[:40]!r} "
+            f"total_chars={len(self.current_text)} -> sending ESC interrupt"
+        )
+        try:
+            self.session.send_control_char("\x1b")
+        except Exception as e:
+            logger.warning(f"Loop interrupt ESC failed: {e}")
+
+        async def _alert() -> None:
+            try:
+                await self.bot.send_message(
+                    chat_id=self.chat_id,
+                    text=(
+                        "⚠️ *偵測到重複輸出（疑似 Loop）*\n"
+                        f"同一句話重複超過 {_LOOP_REPEAT_THRESHOLD} 次，已自動送出 *ESC* 中斷。\n"
+                        "若仍卡住，可用 `/aoh_esc` 再中斷，或 `/aoh_stop` 結束。"
+                    ),
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                logger.warning(f"Loop alert delivery failed: {e}")
+
+        asyncio.create_task(_alert())
 
     def _on_tool_request(self, req_id: Any, tool_name: str, tool_args: Any):
         """Render Inline Keyboard for Tool Approval Request with deduplication."""

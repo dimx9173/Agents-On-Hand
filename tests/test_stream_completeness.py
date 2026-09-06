@@ -214,5 +214,83 @@ class TestStreamCompleteness(unittest.TestCase):
         asyncio.run(run_test())
 
 
+class TestRepetitionLoopGuard(unittest.TestCase):
+    """Degeneration-loop guard: detect repeated ack output and interrupt once."""
+
+    def _loop_turn_text(self, n: int) -> str:
+        ack = "收到：Session 選單改兩步，先選 Agent 再列 Session，外部執行中的也要列出。我來完成這個調整。"
+        return "\n\n".join(ack for _ in range(n)) + "\n"
+
+    def test_detector_returns_none_for_normal_output(self):
+        from agents_on_hand.stream_handler import _detect_repetition_loop
+
+        normal = "\n".join(
+            f"• 完成第 {i} 步：檢查路由、注入依賴、補測試與文件。"
+            for i in range(1, 9)
+        )
+        self.assertIsNone(_detect_repetition_loop(normal))
+
+    def test_detector_catches_identical_repetition(self):
+        from agents_on_hand.stream_handler import _detect_repetition_loop
+
+        phrase = _detect_repetition_loop(self._loop_turn_text(8))
+        self.assertIsNotNone(phrase)
+        self.assertIn("我來完成這個調整", phrase)
+
+    def test_detector_catches_tail_repetition_with_variant_wording(self):
+        """prime loop 措辭略異但結尾相同 — 句尾短語計數要抓到。"""
+        from agents_on_hand.stream_handler import _detect_repetition_loop
+
+        variants = [
+            "收到：Session 選單改兩步，先選 Agent 再列 Session，外部執行中的也要列出。我來完成這個調整。",
+            "收到，Session 選單改成先選 Agent，再列出該 Agent 的 Session（含外部執行中的）。我來完成這個調整。",
+            "收到：Session 選單改成先選 Agent，再列出該 Agent 的 Session（含外部執行中的）。我來完成這個調整。",
+            "收到，Session 選單改成先選 Agent，再列出該 Agent 的 Session，外部執行中的也要一起列出。我來完成這個調整。",
+            "收到：Session 選單改兩步，先選 Agent 再列 Session，外部執行中的也要列出。我來完成這個調整。",
+            "收到：Session 選單改兩步，先選 Agent 再列 Session，外部執行中的也要列出。我來完成這個調整。",
+            "收到，Session 選單改成先選 Agent，再列出該 Agent 的 Session。我來完成這個調整。",
+            "收到：Session 選單改成先選 Agent，再列出該 Agent 的 Session。我來完成這個調整。",
+        ]
+        phrase = _detect_repetition_loop("\n\n".join(variants))
+        self.assertIsNotNone(phrase)
+
+    def test_streamer_sends_esc_and_alert_once_per_turn(self):
+        async def run_test():
+            from agents_on_hand.stream_handler import UnifiedStreamer
+
+            bot = _make_bot()
+            session = MagicMock()
+            session.send_control_char = MagicMock()
+            streamer = UnifiedStreamer(bot=bot, chat_id=12345, session=session, edit_interval=0.05)
+            streamer.start()
+
+            # 送出 loop 文本（分多次 delta 累積）
+            for chunk in ["收到：Session 選單改兩步，先選 Agent 再列 Session。\n",
+                         "收到：Session 選單改兩步，先選 Agent 再列 Session。\n",
+                         "收到：Session 選單改兩步，先選 Agent 再列 Session。\n",
+                         "收到：Session 選單改兩步，先選 Agent 再列 Session。\n",
+                         "收到：Session 選單改兩步，先選 Agent 再列 Session。\n",
+                         "收到：Session 選單改兩步，先選 Agent 再列 Session。\n",
+                         "收到：Session 選單改兩步，先選 Agent 再列 Session。\n",
+                         "收到：Session 選單改兩步，先選 Agent 再列 Session。\n",
+                         "收到：Session 選單改兩步，先選 Agent 再列 Session。\n"]:
+                streamer._on_driver_event(DriverEvent(DriverEvent.TEXT_DELTA, content=chunk))
+                await asyncio.sleep(0.01)
+
+            await asyncio.sleep(0.3)  # 讓 alert 送出
+            streamer.stop()
+            await asyncio.sleep(0)
+
+            self.assertEqual(session.send_control_char.call_count, 1, "ESC 應只送一次")
+            self.assertEqual(session.send_control_char.call_args[0][0], "\x1b")
+            alerts = [
+                c.kwargs.get("text")
+                for c in bot.send_message.call_args_list
+                if c.kwargs.get("text") and "偵測到重複輸出" in c.kwargs["text"]
+            ]
+            self.assertEqual(len(alerts), 1, "Loop alert 應只發一次")
+
+        asyncio.run(run_test())
+
 if __name__ == "__main__":
     unittest.main()

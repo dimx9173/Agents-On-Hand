@@ -188,7 +188,15 @@ class ACPDriver(BaseDriver):
             await self.client.respond_to_permission(request_id, approved)
 
     @property
+    def acp_session_id(self) -> str | None:
+        """The agent-side ACP session id (from session/new) for agent-side purge."""
+        return getattr(self.client, "acp_session_id", None)
+
+    @property
     def pid(self) -> int | None:
+        """ACPDriver wraps its process in the ACPClient."""
+        proc = getattr(self.client, "process", None)
+        return getattr(proc, "pid", None)
         """ACPDriver wraps its process in the ACPClient."""
         proc = getattr(self.client, "process", None)
         return getattr(proc, "pid", None)

@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .agent_session_cleaner import PurgeResult, purge_agent_session
 from .ansi_cleaner import strip_ansi_codes
 from .config import AVAILABLE_CLI_AGENTS, SESSION_LOG_DIR, SESSION_STATE_FILE
 from .drivers import (
@@ -577,6 +578,39 @@ class SessionManager:
             self._save_to_store()
             return True
         return False
+
+    async def delete_session(self, user_id: int, session_id: str) -> tuple[bool, PurgeResult]:
+        """Delete a session on BOTH sides (session-leak prevention).
+
+        AOH side: stops the process and removes the in-memory/persisted
+        record. Agent side: delegates to :func:`purge_agent_session`, which
+        ONLY uses the agent's command surface (never touches files).
+
+        Returns (removed_aoh, purge_result).
+        """
+        session = self.sessions.get(session_id)
+        if session is None:
+            return False, PurgeResult(False, "unknown", "session not found")
+        acp_session_id = getattr(session.driver, "acp_session_id", None) or None
+        agent_key = session.agent_key
+        working_dir = session.working_dir
+        stale_pid = session.stop()
+        if stale_pid is not None:
+            kill_pid_safely(stale_pid)
+        del self.sessions[session_id]
+        for uid, active_sid in list(self.user_active_session.items()):
+            if active_sid == session_id:
+                del self.user_active_session[uid]
+        self._save_to_store()
+        try:
+            purge = await purge_agent_session(
+                agent_key,
+                acp_session_id=acp_session_id,
+                working_dir=working_dir,
+            )
+        except Exception as e:  # noqa: BLE001 - aoh removal already done
+            purge = PurgeResult(False, "error", str(e))
+        return True, purge
 
     def prune_offline_sessions(self, user_id: int) -> int:
         """Remove all non-running sessions for a given user from memory and store.

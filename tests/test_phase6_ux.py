@@ -61,8 +61,8 @@ def test_u1_compact_rows_two_lines_per_session():
     # Step-2 agent view: one text line per session (short ids only in buttons)
     assert "sess_a" not in txt and "sess_b" not in txt
     assert "Bash Shell" in txt
-    # 3 buttons per session (primary + log + kill) + prune + back rows
-    assert len(btns) == 3 * 2 + 2
+    # 4 buttons per session (primary + log + stop + delete) + prune + back rows
+    assert len(btns) == 4 * 2 + 2
     # Primary buttons carry context; kill always last in secondary row
     assert any(b.text.startswith("▶️ ") for b in btns)
     assert any(b.text.startswith("🔄 ") for b in btns)

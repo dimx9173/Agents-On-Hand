@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING, Any
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
+from ..agent_session_cleaner import PurgeResult, purge_agent_session
 from ..ansi_cleaner import format_telegram_code_block
-from ..callback_registry import get_path_token
+from ..callback_registry import get_path_token, register_external_info, resolve_external_info
 from ..runtime import active_streamers, bot_app, create_streamer_for_session
 from ..security import restricted
 from ..session_manager import session_manager
@@ -19,8 +20,14 @@ from ..ui.directory_browser import (
 
 if TYPE_CHECKING:
     from ..session_manager import AgentSession
-
 logger = logging.getLogger("AgentsOnHand")
+
+
+def _purge_report(purge: PurgeResult) -> str:
+    """One-line agent-side purge summary for Telegram replies."""
+    icon = "✅" if purge.ok else "⚠️"
+    targets = f" ({len(purge.targets)} 個目標)" if purge.targets else ""
+    return f"agent 端（{purge.method}）: {icon} {purge.detail}{targets}"
 
 
 def _session_label(s: "AgentSession", active_session: "AgentSession | None") -> str:
@@ -39,11 +46,13 @@ def _build_session_rows(
 
     Line 1 (identity + primary action): switch/restart target as the label
     itself so the button text carries context on narrow screens.
-    Line 2 (secondary): log + kill only. Destructive kill is always last.
+    Line 2 (secondary): log + stop + delete. 🛑 刪除 stops the process;
+    🗑️ 刪除 permanently removes the session on BOTH sides
+    (aoh record + agent-side store via agent command).
 
-    - Active + running  -> [⭐ <label>] / [📄 Log][🛑 刪除]
-    - Running (bg)      -> [▶️ <label>] / [📄 Log][🛑 刪除]
-    - Offline           -> [🔄 <label>] / [📄 Log][🛑 刪除]
+    - Active + running  -> [⭐ <label>] / [📄 Log][🛑 刪除][🗑️ 刪除]
+    - Running (bg)      -> [▶️ <label>] / [📄 Log][🛑 刪除][🗑️ 刪除]
+    - Offline           -> [🔄 <label>] / [📄 Log][🛑 刪除][🗑️ 刪除]
     """
     short_id = s.session_id.removeprefix("sess_")
     label = f"{s.agent_name} · {s.working_dir.name} · {short_id}"
@@ -59,6 +68,7 @@ def _build_session_rows(
     secondary = [
         InlineKeyboardButton("📄 Log", callback_data=f"sess:logs:{s.session_id}"),
         InlineKeyboardButton("🛑 刪除", callback_data=f"sess:kill:{s.session_id}"),
+        InlineKeyboardButton("🗑️ 刪除", callback_data=f"sess:del_confirm:{s.session_id}"),
     ]
     return [[primary], secondary]
 
@@ -203,14 +213,18 @@ async def _build_agent_sessions_view(
                 continue
             label, detail = row
             lines.append(detail)
+            # Telegram callback_data <= 64 bytes: short registry token, not raw id.
+            ext_token = register_external_info(str(ext.get("id", "")), agent_key, working_dir)
             keyboard.append(
                 [
                     InlineKeyboardButton(
-                        label[:64],
-                        callback_data=(
-                            f"agent:attach_ext:{get_path_token(working_dir)}:{agent_key}:{ext.get('id')}"
-                        ),
-                    )
+                        label[:58],
+                        callback_data=(f"agent:attach_ext:{ext_token}"),
+                    ),
+                    InlineKeyboardButton(
+                        "🗑️",
+                        callback_data=(f"sess:delete_ext:{ext_token}"),
+                    ),
                 ]
             )
     has_offline = any(not s.is_running for s in agent_sessions)
@@ -438,3 +452,61 @@ async def session_action_callback_handler(
             )
         else:
             await query.message.reply_text("❌ 結束 Session 失敗或不存在。")
+
+    elif action == "del_confirm":
+        sess = session_manager.get_session(session_id)
+        if not sess:
+            await query.message.reply_text("❌ 該 Session 已不存在。")
+            return
+        await query.edit_message_text(
+            f"⚠️ *確定永久刪除？*\n\n`{session_id}` · {sess.agent_name} · `{sess.working_dir}`\n"
+            "同時清除 aoh 記錄與 agent 端 session（皆透過指令執行），無法復原。",
+
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton("🗑️ 確認刪除", callback_data=f"sess:delete:{session_id}"),
+                        InlineKeyboardButton("↩️ 取消", callback_data="sess:back"),
+                    ]
+                ]
+            ),
+        )
+        return
+
+    elif action == "delete":
+        removed, purge = await session_manager.delete_session(user_id, session_id)
+        if not removed:
+            await query.message.reply_text("❌ 該 Session 已不存在。")
+            return
+        if (
+            user_id in active_streamers
+            and active_streamers[user_id].session.session_id == session_id
+        ):
+            active_streamers[user_id].stop()
+            del active_streamers[user_id]
+        await query.edit_message_text(
+            f"🗑️ 已刪除 Session: `{session_id}`\n" + _purge_report(purge),
+            parse_mode="Markdown",
+        )
+        return
+
+    elif action == "delete_ext":
+        info = resolve_external_info(session_id)
+        if not info:
+            await query.answer("⚠️ 該外部 session 記錄已過期，請重新開啟選單。", show_alert=True)
+            return
+        ext_id, agent_key = str(info.get("ext_id", "")), str(info.get("agent_key", ""))
+        working_dir = info.get("working_dir")
+        if not ext_id:
+            await query.message.reply_text("❌ 外部 session id 無效。")
+            return
+        purge = await purge_agent_session(
+            agent_key,
+            external_id=ext_id,
+            working_dir=working_dir if isinstance(working_dir, Path) else None,
+        )
+        await query.edit_message_text(
+            f"🗑️ 外部 session `{ext_id[:12]}`（{agent_key}）\n" + _purge_report(purge),
+            parse_mode="Markdown",
+        )

@@ -40,8 +40,13 @@ class ACPClient:
         if callback not in self._permission_listeners:
             self._permission_listeners.append(callback)
 
-    async def start(self):
-        """Spawn the ACP stdio process and start reading JSON-RPC lines."""
+    async def start(self, resume_session_id: str | None = None):
+        """Spawn the ACP stdio process and start reading JSON-RPC lines.
+
+        When resume_session_id is given, `session/load` is used to re-attach
+        the saved session instead of `session/new` (opencode/omp support it).
+        Falls back to `session/new` when the load fails.
+        """
         cmd_parts = self.command.split()
         logger.info(f"Spawning ACP process: {cmd_parts} in cwd={self.working_dir}")
 
@@ -69,6 +74,30 @@ class ACPClient:
         )
 
         logger.info(f"ACP Initialize handshake successful: {init_res}")
+
+        self.resume_session_id = resume_session_id
+        if resume_session_id:
+            try:
+                load_res = await self.call_method(
+                    "session/load",
+                    {"sessionId": resume_session_id, "cwd": str(self.working_dir)},
+                    timeout=10.0,
+                )
+                logger.info(f"ACP session/load ok: {load_res}")
+            except Exception as e:
+                logger.warning(f"ACP session/load failed ({e}), falling back to session/new")
+                load_res = None
+            if isinstance(load_res, dict):
+                sid = load_res.get("sessionId") or resume_session_id
+                self.acp_session_id = sid
+                if self._trace:
+                    try:
+                        self._trace.acp_session_id(self.acp_session_id)
+                    except Exception:
+                        pass
+                return init_res
+            # load failed without raising (no sessionId) → fall through to new
+            logger.warning(f"session/load did not return sessionId: {load_res}")
 
         # Create ACP Session via session/new
         sess_res = await self.call_method(

@@ -69,7 +69,8 @@ async def test_journey_new_session_via_directory_browser(tmp_path):
     ):
         mock_sess = _make_mock_session("sess_new", "Bash", True)
         sm.create_session.return_value = mock_sess
-        sm.find_running_session.return_value = None  # no reuse candidate → create
+        sm.find_dir_agent_sessions.return_value = []  # no reuse candidate → picker
+        sm.get_active_session.return_value = None
         q2 = MagicMock()
         q2.answer = AsyncMock()
         q2.edit_message_text = AsyncMock()
@@ -85,8 +86,11 @@ async def test_journey_new_session_via_directory_browser(tmp_path):
         mk_streamer.return_value = MagicMock()
         mk_streamer.return_value.start = MagicMock()
         await agent_start_callback_handler(update2, ctx)
-        sm.create_session.assert_called_once()
+        sm.create_session.assert_not_called()
         q2.edit_message_text.assert_called_once()
+        markup = q2.edit_message_text.call_args[1]["reply_markup"]
+        callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+        assert any(c.startswith("agent:force_new:") for c in callbacks)
 
 
 @pytest.mark.asyncio

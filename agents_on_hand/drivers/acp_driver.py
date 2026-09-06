@@ -60,10 +60,11 @@ def extract_acp_text_delta(params: dict) -> str:
 class ACPDriver(BaseDriver):
     """Protocol Driver implementing standard ACP (JSON-RPC 2.0 stdio)."""
 
-    def __init__(self, command: str, working_dir: Path):
+    def __init__(self, command: str, working_dir: Path, resume_session_id: str | None = None):
         super().__init__(command, working_dir)
         self.client: ACPClient | None = None
         self._monitor_task: asyncio.Task | None = None
+        self.resume_session_id = resume_session_id
 
     def set_trace(self, trace) -> None:
         """Attach SessionTraceLogger for ACP correlation."""
@@ -87,7 +88,7 @@ class ACPDriver(BaseDriver):
             self.client.register_listener(self._on_acp_update)
             self.client.register_permission_listener(self._on_acp_permission_request)
 
-            await self.client.start()
+            await self.client.start(resume_session_id=self.resume_session_id)
             self.is_running = True
             self._monitor_task = asyncio.create_task(self._monitor_exit())
             return True

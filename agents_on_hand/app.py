@@ -23,6 +23,7 @@ from .handlers.chat import (
 from .handlers.restart import session_restart_callback_handler
 from .session_manager import session_manager
 from .ui.directory_browser import (
+    agent_back_callback_handler,
     agent_reuse_callback_handler,
     agent_start_callback_handler,
     directory_callback_handler,
@@ -132,8 +133,11 @@ def main() -> None:
     app.add_handler(CommandHandler("aoh_stop", stop_command))
     app.add_handler(CallbackQueryHandler(directory_callback_handler, pattern=r"^dir:"))
     app.add_handler(
-        CallbackQueryHandler(agent_start_callback_handler, pattern=r"^agent:(start|force_new):")
+        CallbackQueryHandler(
+            agent_start_callback_handler, pattern=r"^agent:(start|force_new|attach_ext):"
+        )
     )
+    app.add_handler(CallbackQueryHandler(agent_back_callback_handler, pattern=r"^agent:back:"))
     app.add_handler(CallbackQueryHandler(agent_reuse_callback_handler, pattern=r"^agent:reuse:"))
     app.add_handler(CallbackQueryHandler(session_action_callback_handler, pattern=r"^sess:"))
     app.add_handler(CallbackQueryHandler(acp_permission_callback_handler, pattern=r"^acp_perm:"))

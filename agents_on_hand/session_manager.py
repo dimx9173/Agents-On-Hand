@@ -50,6 +50,7 @@ class AgentSession:
         command: str,
         working_dir: Path,
         on_exit_callback: Callable[["AgentSession"], None] | None = None,
+        resume_acp_session_id: str | None = None,
     ):
         self.session_id: str = session_id
         self.user_id: int = user_id
@@ -102,6 +103,9 @@ class AgentSession:
         # left behind by a previous bot lifecycle.
         self.agent_pid: int | None = None
 
+        # External ACP session to resume (opencode/omp `session/load`).
+        self.resume_acp_session_id = resume_acp_session_id
+
     @property
     def is_acp(self) -> bool:
         """Return True if using a structured protocol (ACP, Pi RPC, Claude Stream)."""
@@ -127,7 +131,14 @@ class AgentSession:
 
                 logger.info(f"Probing driver '{driver_name}' for session {self.session_id}...")
                 self.trace.driver_probe(driver_name, idx, total)
-                candidate_driver = driver_cls(self.command, self.working_dir)
+                if driver_name == "acp" and self.resume_acp_session_id:
+                    candidate_driver = driver_cls(
+                        self.command,
+                        self.working_dir,
+                        resume_session_id=self.resume_acp_session_id,
+                    )
+                else:
+                    candidate_driver = driver_cls(self.command, self.working_dir)
                 # Wire trace for ACP observability
                 if hasattr(candidate_driver, "set_trace"):
                     try:
@@ -457,6 +468,7 @@ class SessionManager:
         agent_key: str,
         working_dir: Path,
         custom_command: str | None = None,
+        resume_acp_session_id: str | None = None,
     ) -> AgentSession:
         session_id = f"sess_{uuid.uuid4().hex[:8]}"
 
@@ -480,6 +492,7 @@ class SessionManager:
             command=command,
             working_dir=working_dir,
             on_exit_callback=self._handle_session_exit,
+            resume_acp_session_id=resume_acp_session_id,
         )
 
         asyncio.create_task(session.start(preferred_drivers))
@@ -492,6 +505,34 @@ class SessionManager:
     def get_session(self, session_id: str) -> AgentSession | None:
         return self.sessions.get(session_id)
 
+    def find_dir_agent_sessions(
+        self, user_id: int, agent_key: str, working_dir: Path, running_only: bool = True
+    ) -> list[AgentSession]:
+        """List all sessions for user + agent + directory (newest first).
+
+        Powers the dir -> agent instance picker: after choosing a directory
+        and an agent type, the bot lists every live instance so the user can
+        attach to one or start a fresh one.
+        """
+        try:
+            target = working_dir.expanduser().resolve()
+        except Exception:
+            return []
+        matches: list[AgentSession] = []
+        for s in self.sessions.values():
+            if s.user_id != user_id or s.agent_key != agent_key:
+                continue
+            if running_only and not s.is_running:
+                continue
+            try:
+                if s.working_dir.expanduser().resolve() != target:
+                    continue
+            except Exception:
+                continue
+            matches.append(s)
+        matches.sort(key=lambda s: s.created_at, reverse=True)
+        return matches
+
     def find_running_session(
         self, user_id: int, agent_key: str, working_dir: Path
     ) -> AgentSession | None:
@@ -502,22 +543,10 @@ class SessionManager:
         context. Callers check this *before* create_session and offer to
         attach instead. Returns the most recently created match, else None.
         """
-        try:
-            target = working_dir.expanduser().resolve()
-        except Exception:
-            return None
-        best: AgentSession | None = None
-        for s in self.sessions.values():
-            if s.user_id != user_id or s.agent_key != agent_key or not s.is_running:
-                continue
-            try:
-                if s.working_dir.expanduser().resolve() != target:
-                    continue
-            except Exception:
-                continue
-            if best is None or s.created_at > best.created_at:
-                best = s
-        return best
+        matches = self.find_dir_agent_sessions(
+            user_id=user_id, agent_key=agent_key, working_dir=working_dir
+        )
+        return matches[0] if matches else None
 
     def get_active_session(self, user_id: int) -> AgentSession | None:
         active_id = self.user_active_session.get(user_id)

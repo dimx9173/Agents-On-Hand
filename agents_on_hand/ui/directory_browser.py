@@ -5,7 +5,12 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from ..ansi_cleaner import format_telegram_code_block
-from ..callback_registry import get_path_token, resolve_path_token
+from ..callback_registry import (
+    get_path_token,
+    register_external_info,
+    resolve_external_info,
+    resolve_path_token,
+)
 from ..config import (
     ALLOWED_ROOT_DIRS,
     get_installed_cli_agents,
@@ -743,11 +748,14 @@ async def _show_instance_picker(  # type: ignore[no-untyped-def]
                 lines.append(f"• 🟣 `{ext_id[:8]}`{act_badge}{name_badge} · {first}")
             else:
                 lines.append(f"• 🟣 `{ext_id[:8]}`{act_badge}{name_badge}")
+        # Telegram callback_data <= 64 bytes: never embed raw ext_id
+        # (opencode 30 chars / prime UUID 36 chars overflow). Short token instead.
+        ext_token = register_external_info(ext_id, agent_key, working_dir)
         keyboard.append(
             [
                 InlineKeyboardButton(
                     label[:64],
-                    callback_data=f"agent:attach_ext:{dir_token}:{agent_key}:{ext_id}",
+                    callback_data=f"agent:attach_ext:{ext_token}",
                 )
             ]
         )
@@ -788,11 +796,13 @@ async def agent_start_callback_handler(update, context):  # type: ignore[no-unty
     data = query.data
     user_id = query.from_user.id
     parts = data.split(":", 3)
-    if len(parts) < 4:
+    if len(parts) < 3:
         return
     subaction = parts[1]
     if subaction == "force_new":
         # User explicitly chose a fresh session from the reuse prompt.
+        if len(parts) < 4:
+            return
         path_token, agent_key = parts[2], parts[3]
         working_dir = resolve_path_token(path_token)
         if working_dir is None or not is_path_allowed(working_dir):
@@ -807,13 +817,31 @@ async def agent_start_callback_handler(update, context):  # type: ignore[no-unty
         # - prime: start an AOH session in the same cwd — prime's daemon
         #   auto-attaches the live session, so chat continues where it left off.
         # - opencode: resume the saved session via ACP `session/load`.
-        # Callback: agent:attach_ext:<dir_token>:<agent_key>:<ext_id>
+        # New callback: agent:attach_ext:<ext_token> (short registry token,
+        # keeps callback_data <= 64 bytes).
+        # Legacy callback: agent:attach_ext:<dir_token>:<agent_key>:<ext_id>
         # (ext_id may itself contain ":", so split with maxsplit=4.)
-        ext_parts = data.split(":", 4)
-        if len(ext_parts) < 5:
-            return
-        _, _, path_token, ext_agent, ext_id = ext_parts
-        working_dir = resolve_path_token(path_token)
+        ext_agent = ""
+        ext_id = ""
+        working_dir = None
+        legacy_parts = data.split(":", 4)
+        if len(legacy_parts) >= 5 and resolve_path_token(legacy_parts[2]) is not None:
+            _, _, path_token, ext_agent, ext_id = legacy_parts
+            working_dir = resolve_path_token(path_token)
+        else:
+            token_parts = data.split(":", 2)
+            if len(token_parts) < 3:
+                return
+            info = resolve_external_info(token_parts[2])
+            if info is None:
+                await query.edit_message_text(
+                    "⚠️ 該外部 session 按鈕已過期，請重新開啟選單再試。",
+                    parse_mode="Markdown",
+                )
+                return
+            ext_agent = str(info.get("agent_key", ""))
+            ext_id = str(info.get("ext_id", ""))
+            working_dir = info.get("working_dir")
         if working_dir is None or not is_path_allowed(working_dir):
             await query.edit_message_text(
                 "⛔ *無法啟動*：工作目錄無效或超出允許範圍。", parse_mode="Markdown"

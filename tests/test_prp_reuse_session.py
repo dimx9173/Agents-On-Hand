@@ -404,7 +404,16 @@ async def test_start_lists_external_prime_sessions():
     markup = q.edit_message_text.call_args[1]["reply_markup"]
     callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
     assert f"agent:reuse:{live.session_id}" in callbacks
-    assert any(c.startswith("agent:attach_ext:") and ":prime:39e9e50451eb" in c for c in callbacks)
+    from agents_on_hand.callback_registry import resolve_external_info
+
+    attach = [c for c in callbacks if c.startswith("agent:attach_ext:")]
+    assert attach
+    assert all(len(c.encode()) <= 64 for c in attach)
+    infos = [resolve_external_info(c.split(":", 2)[2]) for c in attach]
+    assert any(
+        i and i.get("ext_id") == "39e9e50451eb" and i.get("agent_key") == "prime"
+        for i in infos
+    )
     assert any(c.startswith("agent:force_new:") for c in callbacks)
 
 
@@ -434,9 +443,11 @@ async def test_start_no_external_lookup_for_non_prime():
 @pytest.mark.asyncio
 async def test_attach_ext_launches_session_in_same_cwd():
     """Tapping an external row starts an AOH prime session (daemon auto-attaches)."""
+    from agents_on_hand.callback_registry import register_external_info
     from agents_on_hand.ui.directory_browser import agent_start_callback_handler
 
-    update, ctx, q = _make_start_update("agent:attach_ext:tok:prime:39e9e50451eb")
+    _ext_tok = register_external_info("39e9e50451eb", "prime", Path("/tmp/proj"))
+    update, ctx, q = _make_start_update(f"agent:attach_ext:{_ext_tok}")
     with (
         patch("agents_on_hand.security.is_user_allowed", return_value=True),
         patch(
@@ -468,9 +479,11 @@ async def test_attach_ext_launches_session_in_same_cwd():
 @pytest.mark.asyncio
 async def test_attach_ext_gone_shows_hint():
     """External ended between list and tap → hint, no session created."""
+    from agents_on_hand.callback_registry import register_external_info
     from agents_on_hand.ui.directory_browser import agent_start_callback_handler
 
-    update, ctx, q = _make_start_update("agent:attach_ext:tok:prime:deadbeef")
+    _ext_tok = register_external_info("deadbeef", "prime", Path("/tmp/proj"))
+    update, ctx, q = _make_start_update(f"agent:attach_ext:{_ext_tok}")
     with (
         patch("agents_on_hand.security.is_user_allowed", return_value=True),
         patch(
@@ -534,16 +547,28 @@ async def test_start_lists_external_opencode_sessions():
         sm.create_session.assert_not_called()
     markup = q.edit_message_text.call_args[1]["reply_markup"]
     callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
-    assert any(c.startswith("agent:attach_ext:") and ":opencode:ses_aaa111" in c for c in callbacks)
+    from agents_on_hand.callback_registry import resolve_external_info as _resolve_ext
+
+    attach = [c for c in callbacks if c.startswith("agent:attach_ext:")]
+    assert attach
+    assert all(len(c.encode()) <= 64 for c in attach)
+    assert any(
+        (_i := _resolve_ext(c.split(":", 2)[2]))
+        and _i.get("ext_id") == "ses_aaa111"
+        and _i.get("agent_key") == "opencode"
+        for c in attach
+    )
     assert any(c.startswith("agent:force_new:") for c in callbacks)
 
 
 @pytest.mark.asyncio
 async def test_attach_ext_opencode_resumes_session():
     """Tapping an external opencode row resumes it via ACP session/load."""
+    from agents_on_hand.callback_registry import register_external_info
     from agents_on_hand.ui.directory_browser import agent_start_callback_handler
 
-    update, ctx, q = _make_start_update("agent:attach_ext:tok:opencode:ses_aaa111")
+    _ext_tok = register_external_info("ses_aaa111", "opencode", Path("/tmp/proj"))
+    update, ctx, q = _make_start_update(f"agent:attach_ext:{_ext_tok}")
     with (
         patch("agents_on_hand.security.is_user_allowed", return_value=True),
         patch(
@@ -574,9 +599,11 @@ async def test_attach_ext_opencode_resumes_session():
 @pytest.mark.asyncio
 async def test_attach_ext_opencode_gone_shows_hint():
     """External opencode session vanished → hint, no session created."""
+    from agents_on_hand.callback_registry import register_external_info
     from agents_on_hand.ui.directory_browser import agent_start_callback_handler
 
-    update, ctx, q = _make_start_update("agent:attach_ext:tok:opencode:ses_gone")
+    _ext_tok = register_external_info("ses_gone", "opencode", Path("/tmp/proj"))
+    update, ctx, q = _make_start_update(f"agent:attach_ext:{_ext_tok}")
     with (
         patch("agents_on_hand.security.is_user_allowed", return_value=True),
         patch(
@@ -666,16 +693,28 @@ async def test_start_lists_external_omp_sessions(tmp_path, monkeypatch):
         sm.create_session.assert_not_called()
     markup = q.edit_message_text.call_args[1]["reply_markup"]
     callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
-    assert any(c.startswith("agent:attach_ext:") and ":omp:aaa111" in c for c in callbacks)
+    from agents_on_hand.callback_registry import resolve_external_info as _resolve_ext2
+
+    attach = [c for c in callbacks if c.startswith("agent:attach_ext:")]
+    assert attach
+    assert all(len(c.encode()) <= 64 for c in attach)
+    assert any(
+        (_i := _resolve_ext2(c.split(":", 2)[2]))
+        and _i.get("ext_id") == "aaa111"
+        and _i.get("agent_key") == "omp"
+        for c in attach
+    )
     assert any(c.startswith("agent:force_new:") for c in callbacks)
 
 
 @pytest.mark.asyncio
 async def test_attach_ext_omp_resumes_session():
     """Tapping an external omp row resumes it via ACP session/load."""
+    from agents_on_hand.callback_registry import register_external_info
     from agents_on_hand.ui.directory_browser import agent_start_callback_handler
 
-    update, ctx, q = _make_start_update("agent:attach_ext:tok:omp:aaa111")
+    _ext_tok = register_external_info("aaa111", "omp", Path("/tmp/proj"))
+    update, ctx, q = _make_start_update(f"agent:attach_ext:{_ext_tok}")
     with (
         patch("agents_on_hand.security.is_user_allowed", return_value=True),
         patch(

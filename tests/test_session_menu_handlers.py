@@ -242,11 +242,19 @@ async def test_sess_agent_view_includes_external_sessions():
         for row in q.edit_message_text.call_args[1]["reply_markup"].inline_keyboard
         for b in row
     ]
+    from agents_on_hand.callback_registry import resolve_external_info
+
     attach_btns = [
         b for b in btns if b.callback_data and b.callback_data.startswith("agent:attach_ext:")
     ]
     assert attach_btns
-    assert any(b.callback_data.endswith(":opencode:ses_ext1234") for b in attach_btns)
+    assert all(len(b.callback_data.encode()) <= 64 for b in attach_btns)
+    assert any(
+        (info := resolve_external_info(b.callback_data.split(":", 2)[2]))
+        and info.get("ext_id") == "ses_ext1234"
+        and info.get("agent_key") == "opencode"
+        for b in attach_btns
+    )
     assert any("🟣" in b.text for b in attach_btns)
 
 

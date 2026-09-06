@@ -2,10 +2,13 @@
 
 from .app import global_error_handler, main, post_init
 from .callback_registry import (
+    external_registry,
     get_path_token,
     path_registry,
     path_to_token,
+    register_external_info,
     register_restart_info,
+    resolve_external_info,
     resolve_path_token,
     restart_registry,
 )
@@ -40,6 +43,9 @@ __all__ = [
     "create_streamer_for_session",
     "get_path_token",
     "resolve_path_token",
+    "register_external_info",
+    "resolve_external_info",
+    "external_registry",
     "register_restart_info",
     "path_registry",
     "path_to_token",

@@ -292,5 +292,38 @@ class TestRepetitionLoopGuard(unittest.TestCase):
 
         asyncio.run(run_test())
 
+    def test_fenced_log_does_not_break_markdown_block(self):
+        """A log containing triple backticks must not close the outer Markdown fence early."""
+        from agents_on_hand.ansi_cleaner import format_telegram_code_block
+
+        block = format_telegram_code_block("foo\n```\n```x```\nbar", max_chars=9999)
+        inner = block[block.index("\n") + 1 : block.rindex("\n")]
+        self.assertNotIn("```\n", inner)
+        self.assertIn("\u200b", block)
+
+    def test_retryafter_not_lost_schedules_retry(self):
+        """A RetryAfter 429 must be swallowed (not logged as failure) and leave a retry marker."""
+
+        async def run_test():
+            from telegram.error import RetryAfter
+
+            import agents_on_hand.stream_handler as sh
+            from agents_on_hand.stream_handler import UnifiedStreamer
+
+            sh._chat_next_slot.clear()
+            sh._chat_flood_until.clear()
+            bot = _make_bot()
+            msg = MagicMock(message_id=99)
+            bot.send_message = AsyncMock(side_effect=[RetryAfter(2), msg])
+            sess = MagicMock()
+            st = UnifiedStreamer(bot=bot, chat_id=99111, session=sess, edit_interval=0.05, chat_min_gap=0.0)
+            st.start()
+            st._on_driver_event(DriverEvent(DriverEvent.TEXT_DELTA, content="hello"))
+            await asyncio.sleep(0.6)
+            st.stop()
+            self.assertTrue(sh._chat_flood_until.get(99111, 0.0) > 0.0)
+
+        asyncio.run(run_test())
+
 if __name__ == "__main__":
     unittest.main()

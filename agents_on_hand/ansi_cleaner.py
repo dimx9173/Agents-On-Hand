@@ -652,9 +652,16 @@ def format_hermes_style(text: str) -> str:
     return "\n".join(formatted_lines)
 
 
+_FENCE_RUN_PATTERN = re.compile(r"`{3,}")
+
+
+def break_markdown_fences(text: str) -> str:
+    return _FENCE_RUN_PATTERN.sub(lambda m: "\u200b".join(m.group(0)), text)
+
+
 def format_telegram_code_block(text: str, max_chars: int = 3800, lang: str = "") -> str:
     """Strip ANSI codes, clean text, and format inside a safe Markdown code block."""
-    clean = clean_cli_output(text)
+    clean = break_markdown_fences(clean_cli_output(text))
 
     if len(clean) > max_chars:
         trimmed_notice = "... [Log truncated - Showing last output] ...\n"

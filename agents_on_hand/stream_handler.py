@@ -10,7 +10,7 @@ import re
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import BadRequest
+from telegram.error import BadRequest, RetryAfter
 
 from .ansi_cleaner import (
     escape_html,
@@ -20,6 +20,11 @@ from .ansi_cleaner import (
 from .drivers.base_driver import DriverEvent
 
 logger = logging.getLogger(__name__)
+
+_chat_next_slot: dict[int, float] = {}
+_chat_flood_until: dict[int, float] = {}
+_CHAT_MIN_GAP = 1.2
+_FLOOD_INLINE_CAP = 3.0
 
 
 def split_text_into_chunks(text: str, max_chars: int = 3800) -> list[str]:
@@ -85,11 +90,13 @@ class UnifiedStreamer:
         chat_id: int,
         session: Any,
         edit_interval: float = 1.8,
+        chat_min_gap: float | None = None,
     ):
         self.bot = bot
         self.chat_id = chat_id
         self.session = session
         self.edit_interval = edit_interval
+        self.chat_min_gap = _CHAT_MIN_GAP if chat_min_gap is None else chat_min_gap
 
         self.current_text: str = ""
         self.current_thought: str = ""
@@ -116,8 +123,8 @@ class UnifiedStreamer:
         # throttle ticks skip render + split + edit entirely.
         self._dirty: bool = False
         self._delivered_chunks: int = 0
-        # Degeneration-loop alert sent once per turn (prevents ESC spam).
         self._loop_alert_sent: bool = False
+        self._flood_deferred: bool = False
 
     @property
     def current_msg_id(self) -> int | None:
@@ -242,7 +249,8 @@ class UnifiedStreamer:
         """Periodically send Telegram typing status every 4s while turn is active."""
         while self._is_active and not self._is_turn_final:
             try:
-                await self.bot.send_chat_action(chat_id=self.chat_id, action="typing")
+                if asyncio.get_running_loop().time() >= _chat_flood_until.get(self.chat_id, 0.0):
+                    await self.bot.send_chat_action(chat_id=self.chat_id, action="typing")
             except Exception as e:
                 logger.debug(f"Error sending typing action: {e}")
             await asyncio.sleep(4.0)
@@ -382,15 +390,26 @@ class UnifiedStreamer:
         )
 
         async def _safe_send_tool_req():
-            try:
-                await self.bot.send_message(
-                    chat_id=self.chat_id,
-                    text=text,
-                    reply_markup=reply_markup,
-                    parse_mode="HTML",
-                )
-            except Exception as e:
-                logger.warning(f"Error sending tool request message: {e}")
+            for attempt in range(2):
+                try:
+                    await self.bot.send_message(
+                        chat_id=self.chat_id,
+                        text=text,
+                        reply_markup=reply_markup,
+                        parse_mode="HTML",
+                    )
+                    return
+                except RetryAfter as e:
+                    self._on_flood(e)
+                    if attempt == 0:
+                        retry = float(getattr(e, "retry_after", 0) or 30)
+                        logger.warning(
+                            f"[TG_FLOOD] tool request flood-blocked, retrying in {retry:.0f}s"
+                        )
+                        await asyncio.sleep(retry + 1.0)
+                except Exception as e:
+                    logger.warning(f"Error sending tool request message: {e}")
+                    return
 
         asyncio.create_task(_safe_send_tool_req())
 
@@ -399,6 +418,35 @@ class UnifiedStreamer:
         if self._trailing_flush_task and not self._trailing_flush_task.done():
             self._trailing_flush_task.cancel()
         self._trailing_flush_task = None
+
+    async def _respect_chat_slot(self) -> float:
+        now = asyncio.get_running_loop().time()
+        slot = max(now, _chat_next_slot.get(self.chat_id, 0.0), _chat_flood_until.get(self.chat_id, 0.0))
+        wait = slot - now
+        if wait > _FLOOD_INLINE_CAP:
+            return wait
+        _chat_next_slot[self.chat_id] = slot + self.chat_min_gap
+        if wait > 0:
+            await asyncio.sleep(wait)
+        return 0.0
+
+    def _schedule_flood_retry(self, delay: float) -> None:
+        """Defer accumulated state until the flood penalty expires."""
+        self._dirty = True
+        self._flood_deferred = True
+        self._last_rendered = ""
+        self._delivered_chunks = 0
+        if self._trailing_flush_task is None or self._trailing_flush_task.done():
+            self._trailing_flush_task = asyncio.create_task(self._trailing_flush(delay + 0.5))
+        logger.warning(
+            f"[TG_FLOOD] chat={self.chat_id} flood control — deferring delivery ~{delay:.0f}s"
+        )
+
+    def _on_flood(self, err: RetryAfter) -> None:
+        """Record Telegram's penalty window and schedule a re-delivery."""
+        retry = float(getattr(err, "retry_after", 0) or 30)
+        _chat_flood_until[self.chat_id] = asyncio.get_running_loop().time() + retry
+        self._schedule_flood_retry(retry)
 
     async def _schedule_edit(self):
         """Throttle and edit Telegram message.
@@ -460,6 +508,10 @@ class UnifiedStreamer:
         """
         is_edit = msg_id is not None
         action = "edit" if is_edit else "send"
+        wait = await self._respect_chat_slot()
+        if wait > 0:
+            self._schedule_flood_retry(wait)
+            return msg_id
         logger.info(
             f"[TG_DELIVER] chat={self.chat_id} action={action} msg_id={msg_id} chars={len(formatted)} is_final={self._is_turn_final}"
         )
@@ -484,6 +536,9 @@ class UnifiedStreamer:
                 except Exception:
                     pass
                 return msg.message_id
+            except RetryAfter as e:
+                self._on_flood(e)
+                return None
             except BadRequest as e:
                 logger.warning(
                     f"[TG_DELIVER_HTML_FAIL] chat={self.chat_id} action=send err={e} retry_plain=True"
@@ -497,6 +552,8 @@ class UnifiedStreamer:
                         **plain_kwargs,
                     )
                     return msg.message_id
+                except RetryAfter as plain_err:
+                    self._on_flood(plain_err)
                 except Exception as plain_err:
                     logger.debug(f"Error creating initial streaming msg (plain retry): {plain_err}")
             except Exception as e:
@@ -517,6 +574,9 @@ class UnifiedStreamer:
             except Exception:
                 pass
             return msg_id
+        except RetryAfter as e:
+            self._on_flood(e)
+            return msg_id
         except BadRequest as e:
             err_str = str(e).lower()
             if "not modified" in err_str:
@@ -534,6 +594,8 @@ class UnifiedStreamer:
                     **plain_kwargs,
                 )
                 return msg_id
+            except RetryAfter as retry_err:
+                self._on_flood(retry_err)
             except BadRequest as retry_err:
                 if "not modified" not in str(retry_err).lower():
                     logger.debug(f"Error editing streaming msg (plain retry): {retry_err}")
@@ -570,6 +632,7 @@ class UnifiedStreamer:
         if not self._dirty and not self._is_turn_final:
             return
         self._dirty = False
+        self._flood_deferred = False
 
         formatted = self._render_content(
             self.current_text, self.current_thought, is_final=self._is_turn_final
@@ -606,8 +669,9 @@ class UnifiedStreamer:
                     new_id = await self._deliver_single(chunk, None)
                     if new_id:
                         self.msg_ids.append(new_id)
-                self._last_rendered = formatted
-                self._last_rendered_chunk0 = first_now
+                if not self._flood_deferred:
+                    self._last_rendered = formatted
+                    self._last_rendered_chunk0 = first_now
                 return
 
         action_markup = None
@@ -641,9 +705,9 @@ class UnifiedStreamer:
                 if new_id:
                     self.msg_ids.append(new_id)
 
-        self._last_rendered = formatted
+        self._last_rendered = "" if self._flood_deferred else formatted
         self._last_rendered_chunk0 = chunks[0] if chunks else ""
-        self._delivered_chunks = len(chunks)
+        self._delivered_chunks = 0 if self._flood_deferred else len(chunks)
 
 
 # Compatibility Alias for bot.py and tests

@@ -52,6 +52,7 @@ class AgentSession:
         working_dir: Path,
         on_exit_callback: Callable[["AgentSession"], None] | None = None,
         resume_acp_session_id: str | None = None,
+        acp_session_id: str | None = None,
     ):
         self.session_id: str = session_id
         self.user_id: int = user_id
@@ -104,8 +105,8 @@ class AgentSession:
         # left behind by a previous bot lifecycle.
         self.agent_pid: int | None = None
 
-        # External ACP session to resume (opencode/omp `session/load`).
         self.resume_acp_session_id = resume_acp_session_id
+        self.acp_session_id: str | None = acp_session_id
 
     @property
     def is_acp(self) -> bool:
@@ -132,18 +133,25 @@ class AgentSession:
 
                 logger.info(f"Probing driver '{driver_name}' for session {self.session_id}...")
                 self.trace.driver_probe(driver_name, idx, total)
-                if driver_name == "acp" and self.resume_acp_session_id:
-                    candidate_driver = driver_cls(
-                        self.command,
-                        self.working_dir,
-                        resume_session_id=self.resume_acp_session_id,
+                if driver_name == "acp":
+                    resumable = AVAILABLE_CLI_AGENTS.get(self.agent_key, {}).get("load_session", True)
+                    resume_id = (
+                        (self.resume_acp_session_id or self.acp_session_id) if resumable else None
                     )
+                    if resume_id:
+                        candidate_driver = driver_cls(
+                            self.command,
+                            self.working_dir,
+                            resume_session_id=resume_id,  # type: ignore[call-arg]
+                        )
+                    else:
+                        candidate_driver = driver_cls(self.command, self.working_dir)
                 else:
-                    candidate_driver = driver_cls(self.command, self.working_dir)
-                # Wire trace for ACP observability
-                if hasattr(candidate_driver, "set_trace"):
+                    candidate_driver = driver_cls(self.command, self.working_dir)  # type: ignore[call-arg]
+                trace_target = candidate_driver  # type: ignore[has-type]
+                if hasattr(trace_target, "set_trace"):
                     try:
-                        candidate_driver.set_trace(self.trace)
+                        trace_target.set_trace(self.trace)  # type: ignore[attr-defined]
                     except Exception:
                         pass
                 candidate_driver.register_listener(self._on_driver_event)
@@ -178,9 +186,10 @@ class AgentSession:
             )
             self.trace.driver_probe("pty", total, total)
             pty = PTYDriver(self.command, self.working_dir)
-            if hasattr(pty, "set_trace"):
+            pty_trace = pty  # type: ignore[has-type]
+            if hasattr(pty_trace, "set_trace"):
                 try:
-                    pty.set_trace(self.trace)
+                    pty_trace.set_trace(self.trace)  # type: ignore[attr-defined]
                 except Exception:
                     pass
             pty.register_listener(self._on_driver_event)
@@ -214,6 +223,12 @@ class AgentSession:
             if len(self.recent_output) > 10000:
                 self.recent_output = self.recent_output[-8000:]
             self._buffer_log(event.content)
+            try:
+                sid = getattr(self.driver, "acp_session_id", None) if self.driver else None
+                if sid and sid != self.acp_session_id:
+                    self.acp_session_id = sid
+            except Exception:
+                pass
 
         elif event.event_type == DriverEvent.THOUGHT_DELTA and event.content:
             self.trace.thought_delta(len(event.content))
@@ -407,6 +422,9 @@ class SessionManager:
         self._on_session_finished_callbacks.append(cb)
 
     def _to_record(self, s: AgentSession) -> SessionRecord:
+        acp_sid = getattr(getattr(s, "driver", None), "acp_session_id", None) or getattr(
+            s, "acp_session_id", None
+        )
         return SessionRecord(
             session_id=s.session_id,
             user_id=s.user_id,
@@ -416,6 +434,7 @@ class SessionManager:
             working_dir=str(s.working_dir),
             created_at=s.created_at,
             pid=s.agent_pid,
+            acp_session_id=acp_sid if acp_sid else None,
         )
 
     def _save_to_store(self) -> None:
@@ -437,6 +456,7 @@ class SessionManager:
                     command=r.command,
                     working_dir=Path(r.working_dir),
                     on_exit_callback=self._handle_session_exit,
+                    acp_session_id=getattr(r, "acp_session_id", None),
                 )
                 s.is_running = False
                 s.created_at = r.created_at
@@ -454,6 +474,9 @@ class SessionManager:
 
     def _handle_session_exit(self, session: AgentSession):
         try:
+            drv_sid = getattr(getattr(session, "driver", None), "acp_session_id", None)
+            if drv_sid:
+                session.acp_session_id = drv_sid
             self._save_to_store()
         except Exception:
             pass
@@ -502,6 +525,52 @@ class SessionManager:
         self.user_active_session[user_id] = session_id
         self._save_to_store()
         return session
+
+    def restart_session(self, session_id: str) -> tuple[AgentSession | None, str, asyncio.Task | None]:
+        """Restart an offline session in place (same session_id, same log).
+
+        Returns (session, reason, probe_task). reason explains the outcome:
+        - "ok": probe task started (await it for the True/False bind result)
+        - "already_running": session is live — use switch instead
+        - "not_found": unknown session
+        - "sandbox": working_dir outside ALLOWED_ROOT_DIRS
+        """
+        from .config import ensure_extra_paths, is_path_allowed
+
+        ensure_extra_paths(force=True)
+        s = self.sessions.get(session_id)
+        if s is None:
+            return None, "not_found", None
+        if s.is_running or s.is_starting:
+            return None, "already_running", None
+        if not is_path_allowed(s.working_dir):
+            return None, "sandbox", None
+        resume = s.acp_session_id or s.resume_acp_session_id
+        s.resume_acp_session_id = resume
+        s.acp_session_id = resume
+        s.is_running = False
+        s.is_starting = True
+        s._response_start_time = None
+        s._first_token_time = None
+        s._response_chars = 0
+        s.driver = None
+        s.active_driver_name = "none"
+        s._listeners = []
+        try:
+            s.trace.close()
+        except Exception:
+            pass
+        s.trace = SessionTraceLogger(s.session_id)
+        s.trace.event(
+            "SESSION_INIT",
+            f"agent={s.agent_name} command={s.command} cwd={s.working_dir}",
+        )
+        preferred = ["acp", "pty"]
+        if s.agent_key in AVAILABLE_CLI_AGENTS:
+            preferred = list(AVAILABLE_CLI_AGENTS[s.agent_key].get("drivers", ["acp", "pty"]))
+        probe = asyncio.create_task(s.start(preferred))  # type: ignore[no-untyped-call]
+        self._save_to_store()
+        return s, "ok", probe
 
     def get_session(self, session_id: str) -> AgentSession | None:
         return self.sessions.get(session_id)

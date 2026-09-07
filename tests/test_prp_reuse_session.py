@@ -394,6 +394,7 @@ async def test_start_lists_external_prime_sessions():
             "agents_on_hand.ui.directory_browser._list_external_prime_sessions",
             return_value=externals,
         ) as mock_ext,
+        patch("agents_on_hand.ui.directory_browser.SHOW_EXTERNAL_SESSIONS", True),
     ):
         sm.find_dir_agent_sessions.return_value = [live]
         sm.get_active_session.return_value = None
@@ -514,6 +515,53 @@ def test_filter_opencode_sessions_by_directory(tmp_path):
     assert [s["id"] for s in got] == ["ses_bbb", "ses_aaa"]
     assert _filter_opencode_sessions(None, target) == []
 
+@pytest.mark.asyncio
+async def test_run_opencode_session_list_passes_cwd():
+    """`opencode session list` must run in working_dir (its results are
+    scoped to the cwd-inferred project), else the bot only ever sees its
+    own directory's sessions — vibe-trading external sessions never
+    appear."""
+    import json as _json
+
+    from agents_on_hand.ui.directory_browser import _run_opencode_session_list
+
+    target = Path("/proj/vibe-trading")
+    fake = [{"id": "ses_xyz", "directory": str(target), "title": "t", "updated": 1}]
+    captured: dict = {}
+
+    async def _fake_exec(*args, **kwargs):
+        captured["cwd"] = kwargs.get("cwd")
+        proc = MagicMock()
+        proc.communicate = AsyncMock(return_value=(_json.dumps(fake).encode(), b""))
+        return proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
+        got = await _run_opencode_session_list(target)
+    assert captured["cwd"] == str(target)
+    assert got == fake
+
+
+@pytest.mark.asyncio
+async def test_run_opencode_session_list_default_inherits_cwd():
+    """Without an explicit cwd no cwd arg is forced onto the subprocess
+    (default None = inherit the bot's own cwd, used by any-directory lookup)."""
+    import json as _json
+
+    from agents_on_hand.ui.directory_browser import _run_opencode_session_list
+
+    captured: dict = {}
+
+    async def _fake_exec(*args, **kwargs):
+        captured["cwd"] = kwargs.get("cwd")
+        proc = MagicMock()
+        proc.communicate = AsyncMock(return_value=(_json.dumps([]).encode(), b""))
+        return proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
+        await _run_opencode_session_list()
+    assert captured["cwd"] is None
+
+
 
 @pytest.mark.asyncio
 async def test_start_lists_external_opencode_sessions():
@@ -538,6 +586,7 @@ async def test_start_lists_external_opencode_sessions():
         patch(
             "agents_on_hand.ui.directory_browser._list_external_prime_sessions",
         ) as mock_prime,
+        patch("agents_on_hand.ui.directory_browser.SHOW_EXTERNAL_SESSIONS", True),
     ):
         sm.find_dir_agent_sessions.return_value = []
         sm.get_active_session.return_value = None
@@ -685,6 +734,7 @@ async def test_start_lists_external_omp_sessions(tmp_path, monkeypatch):
             "agents_on_hand.ui.directory_browser._list_external_omp_sessions",
             return_value=externals,
         ) as mock_ext,
+        patch("agents_on_hand.ui.directory_browser.SHOW_EXTERNAL_SESSIONS", True),
     ):
         sm.find_dir_agent_sessions.return_value = []
         sm.get_active_session.return_value = None
@@ -740,3 +790,35 @@ async def test_attach_ext_omp_resumes_session():
             resume_acp_session_id="aaa111",
         )
     assert "接回" in q.edit_message_text.call_args[0][0]
+
+
+
+@pytest.mark.asyncio
+async def test_start_hides_external_sessions_by_default():
+    """AOH_SHOW_EXTERNAL_SESSIONS off (default) — picker never lists 🟣 externals."""
+    from agents_on_hand.ui.directory_browser import agent_start_callback_handler
+
+    live = _mock_running_session("sess_live", agent_key="prime", agent_name="Prime Agent")
+    update, ctx, q = _make_start_update("agent:start:tok:prime")
+    with (
+        patch("agents_on_hand.security.is_user_allowed", return_value=True),
+        patch(
+            "agents_on_hand.ui.directory_browser.resolve_path_token", return_value=Path("/tmp/proj")
+        ),
+        patch("agents_on_hand.ui.directory_browser.is_path_allowed", return_value=True),
+        patch("agents_on_hand.ui.directory_browser.session_manager") as sm,
+        patch("agents_on_hand.ui.directory_browser.SHOW_EXTERNAL_SESSIONS", False),
+        patch(
+            "agents_on_hand.ui.directory_browser._list_external_prime_sessions",
+        ) as mock_ext,
+    ):
+        sm.find_dir_agent_sessions.return_value = [live]
+        sm.get_active_session.return_value = None
+        await agent_start_callback_handler(update, ctx)
+        mock_ext.assert_not_called()
+    txt = q.edit_message_text.call_args[0][0]
+    assert "🟣" not in txt
+    assert "共 1 個可沿用" in txt
+    markup = q.edit_message_text.call_args[1]["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert not [c for c in callbacks if c.startswith("agent:attach_ext:")]

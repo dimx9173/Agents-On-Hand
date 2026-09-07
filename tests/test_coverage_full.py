@@ -364,7 +364,7 @@ async def test_help_command():
     with patch(
         "agents_on_hand.handlers.chat.get_installed_cli_agents",
         return_value={
-            "claude": {"name": "Claude", "use_acp": False},
+            "kimi": {"name": "Kimi Code", "use_acp": True},
             "omp": {"name": "OMP", "use_acp": True},
         },
     ):

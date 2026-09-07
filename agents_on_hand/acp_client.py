@@ -50,12 +50,15 @@ class ACPClient:
         cmd_parts = self.command.split()
         logger.info(f"Spawning ACP process: {cmd_parts} in cwd={self.working_dir}")
 
+        from .config import runtime_env_with_extra_paths
+
         self.process = await asyncio.create_subprocess_exec(
             *cmd_parts,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=self.working_dir,
+            env=runtime_env_with_extra_paths(),
             preexec_fn=set_pdeathsig_and_pgrp,
             limit=10 * 1024 * 1024,  # 10MB line limit for large ACP JSON-RPC payloads
         )

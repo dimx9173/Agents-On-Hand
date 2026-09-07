@@ -19,6 +19,7 @@ class SessionRecord:
     working_dir: str
     created_at: float
     pid: int | None = None
+    acp_session_id: str | None = None
 
 
 class SessionStore(Protocol):

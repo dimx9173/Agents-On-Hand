@@ -33,6 +33,10 @@ ALLOWED_TELEGRAM_USER_IDS: set[int] = _parse_user_ids(_raw_user_ids)
 
 _raw_dev_allow = os.getenv("AOH_DEV_ALLOW_ALL_USERS", "0").strip().lower()
 DEV_ALLOW_ALL: bool = _raw_dev_allow in ("1", "true", "yes")
+# External (started-outside-AOH) sessions in the path-menu picker: hidden by
+# default so saved/live sessions from other windows don't clutter the list.
+_raw_show_ext = os.getenv("AOH_SHOW_EXTERNAL_SESSIONS", "0").strip().lower()
+SHOW_EXTERNAL_SESSIONS: bool = _raw_show_ext in ("1", "true", "yes")
 
 _raw_root_dirs: str = os.getenv("ALLOWED_ROOT_DIRS", os.getcwd())
 if os.getenv("ALLOWED_ROOT_DIRS") is None:
@@ -62,62 +66,125 @@ def ensure_runtime_dirs() -> None:
     SESSION_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 
-# Extra lookup dirs for agent CLIs installed outside PATH (bun, local bin, brew…).
-# Applied lazily via ensure_extra_paths() so that importing this module has no
-# global side effects (previously this rewrote os.environ["PATH"] at import time).
+# Agent CLI lookup dirs outside PATH; globs keep nvm version bumps code-free.
+# Resolved lazily — importing this module never mutates PATH.
 _EXTRA_PATHS = (
     "~/.bun/bin",
     "~/.local/bin",
+    "~/.kimi-code/bin",
+    "~/.nvm/versions/node/*/bin",
     "/usr/local/bin",
+    "/home/linuxbrew/.linuxbrew/bin",
     "/opt/homebrew/bin",
-    "~/.nvm/versions/node/v24.14.0/bin",  # legacy dev-machine path, kept last
 )
 
 _extra_paths_applied = False
 
 
-def ensure_extra_paths() -> None:
-    """Prepend existing extra lookup dirs to os.environ["PATH"] (idempotent)."""
-    global _extra_paths_applied
-    if _extra_paths_applied:
-        return
-    current_path_dirs = os.getenv("PATH", "").split(os.pathsep)
+def _resolve_extra_paths() -> list[str]:
+    """Expand _EXTRA_PATHS globs to existing absolute dirs, stable-ordered."""
+    import glob as _glob
+
+    out: list[str] = []
     for raw in _EXTRA_PATHS:
-        ep = Path(raw).expanduser()
-        if ep.exists() and str(ep) not in current_path_dirs:
-            current_path_dirs.insert(0, str(ep))
-    os.environ["PATH"] = os.pathsep.join(current_path_dirs)
+        pattern = str(Path(raw).expanduser())
+        for match in sorted(_glob.glob(pattern)) + ([pattern] if "*" not in raw else []):
+            p = Path(match)
+            if p.is_dir() and str(p) not in out:
+                out.append(str(p))
+    return out
+
+
+def runtime_env_with_extra_paths() -> dict[str, str]:
+    """Return a copy of the runtime env with agent-CLI lookup dirs prepended."""
+    env = dict(os.environ)
+    cur = env.get("PATH", "").split(os.pathsep)
+    for ep in reversed(_resolve_extra_paths()):
+        if ep not in cur:
+            cur.insert(0, ep)
+    env["PATH"] = os.pathsep.join(cur)
+    return env
+
+
+def ensure_extra_paths(*, force: bool = False) -> None:
+    """Prepend existing extra lookup dirs to os.environ["PATH"]."""
+    global _extra_paths_applied
+    if _extra_paths_applied and not force:
+        return
+    current = os.getenv("PATH", "").split(os.pathsep)
+    for ep in reversed(_resolve_extra_paths()):
+        if ep not in current:
+            current.insert(0, ep)
+    os.environ["PATH"] = os.pathsep.join(current)
     _extra_paths_applied = True
 
 
+# All entries verified via live ACP `initialize` handshake (2026-09-07).
+# load_session: True = restart restores context (session/load); False = fresh context.
 AVAILABLE_CLI_AGENTS: dict[str, dict] = {
-    "claude": {
-        "name": "Claude Code",
-        "command": "claude",
-        "drivers": ["claude_stream", "pty"],
-        "use_acp": False,
-    },
-    "codex": {"name": "Codex CLI", "command": "codex", "drivers": ["pty"], "use_acp": False},
-    "pi": {"name": "Pi Agent", "command": "pi", "drivers": ["pi_rpc", "pty"], "use_acp": False},
-    "omp": {
-        "name": "OMP (Oh My Pi)",
-        "command": "omp acp",
+    "kimi": {
+        "name": "Kimi Code",
+        "command": "kimi acp",
         "drivers": ["acp", "pty"],
         "use_acp": True,
+        "load_session": True,
     },
     "opencode": {
         "name": "OpenCode CLI",
         "command": "opencode acp",
         "drivers": ["acp", "pty"],
         "use_acp": True,
+        "load_session": True,
+    },
+    "omp": {
+        "name": "OMP (Oh My Pi)",
+        "command": "omp acp",
+        "drivers": ["acp", "pty"],
+        "use_acp": True,
+        "load_session": True,
+    },
+    "gemini": {
+        "name": "Gemini CLI",
+        "command": "gemini --acp",
+        "drivers": ["acp", "pty"],
+        "use_acp": True,
+        "load_session": True,
+    },
+    "qwen": {
+        "name": "Qwen Code",
+        "command": "qwen --acp",
+        "drivers": ["acp", "pty"],
+        "use_acp": True,
+        "load_session": True,
+    },
+    "hermes": {
+        "name": "Hermes Agent",
+        "command": "hermes acp",
+        "drivers": ["acp", "pty"],
+        "use_acp": True,
+        "load_session": True,
+    },
+    "openclaw": {
+        "name": "OpenClaw Gateway",
+        "command": "openclaw acp",
+        "drivers": ["acp", "pty"],
+        "use_acp": True,
+        "load_session": True,
     },
     "prime": {
         "name": "Prime Agent",
         "command": "prime-agent --mode acp",
         "drivers": ["acp", "pi_rpc", "pty"],
         "use_acp": True,
+        "load_session": False,
     },
-    "bash": {"name": "Bash Shell", "command": "bash", "drivers": ["pty"], "use_acp": False},
+    "bash": {
+        "name": "Bash Shell",
+        "command": "bash",
+        "drivers": ["pty"],
+        "use_acp": False,
+        "load_session": False,
+    },
 }
 
 

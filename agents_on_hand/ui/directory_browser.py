@@ -13,6 +13,7 @@ from ..callback_registry import (
 )
 from ..config import (
     ALLOWED_ROOT_DIRS,
+    SHOW_EXTERNAL_SESSIONS,
     get_installed_cli_agents,
     is_path_allowed,
 )
@@ -166,8 +167,13 @@ def _filter_opencode_sessions(raw_sessions: object, working_dir: Path) -> list[d
     return out
 
 
-async def _run_opencode_session_list() -> list[dict]:
-    """Run `opencode session list --format json`, fail-open → []."""
+async def _run_opencode_session_list(cwd: Path | None = None) -> list[dict]:
+    """Run `opencode session list --format json`, fail-open → [].
+
+    `opencode session list` scopes results to the project inferred from
+    the process cwd — pass `cwd` (e.g. the working_dir whose external
+    sessions we want) so the CLI returns that project's sessions instead
+    of the bot's own cwd."""
     import asyncio as _asyncio
     import json as _json
     import shutil as _shutil
@@ -185,9 +191,23 @@ async def _run_opencode_session_list() -> list[dict]:
             "list",
             "--format",
             "json",
+            cwd=str(cwd) if cwd is not None else None,
             stdout=_asyncio.subprocess.PIPE,
             stderr=_asyncio.subprocess.PIPE,
         )
+        try:
+            stdout, _ = await _asyncio.wait_for(proc.communicate(), timeout=15.0)
+        except (_asyncio.TimeoutError, TimeoutError):
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            return []
+        try:
+            raw = _json.loads(stdout.decode("utf-8", "replace"))
+        except Exception:
+            return []
+        return raw if isinstance(raw, list) else []
         try:
             stdout, _ = await _asyncio.wait_for(proc.communicate(), timeout=15.0)
         except (_asyncio.TimeoutError, TimeoutError):
@@ -218,14 +238,17 @@ async def _list_external_opencode_sessions(working_dir: Path) -> list[dict]:
     cached = _external_opencode_cache.get(target_key)
     if cached and (now - cached[0]) < _EXTERNAL_PRIME_TTL_S:
         return cached[1]
-    sessions = _filter_opencode_sessions(await _run_opencode_session_list(), working_dir)
+    sessions = _filter_opencode_sessions(await _run_opencode_session_list(working_dir), working_dir)
     _external_opencode_cache[target_key] = (now, sessions)
     return sessions
 
 
-async def _find_external_opencode(ext_id: str) -> dict | None:
-    """Find one opencode session by id (any directory)."""
-    for s in await _run_opencode_session_list():
+async def _find_external_opencode(ext_id: str, working_dir: Path | None = None) -> dict | None:
+    """Find one opencode session by id (any directory).
+
+    `working_dir` is forwarded to `_run_opencode_session_list` so the CLI
+    lists the project that actually owns the session."""
+    for s in await _run_opencode_session_list(working_dir):
         if isinstance(s, dict) and str(s.get("id", "")) == ext_id:
             return s
     return None
@@ -655,27 +678,30 @@ async def _show_instance_picker(  # type: ignore[no-untyped-def]
     #   directory. Tapping one resumes it via ACP `session/load`.
     externals: list[dict] = []
     ext_kind = ""
-    if agent_key == "prime":
-        try:
-            externals = await _list_external_prime_sessions(working_dir)
-            ext_kind = "prime"
-        except Exception as e:
-            logger.debug(f"external prime list failed: {e}")
-            externals = []
-    elif agent_key == "opencode":
-        try:
-            externals = await _list_external_opencode_sessions(working_dir)
-            ext_kind = "opencode"
-        except Exception as e:
-            logger.debug(f"external opencode list failed: {e}")
-            externals = []
-    elif agent_key == "omp":
-        try:
-            externals = await _list_external_omp_sessions(working_dir)
-            ext_kind = "omp"
-        except Exception as e:
-            logger.debug(f"external omp list failed: {e}")
-            externals = []
+    # 🟣 External (started-outside-AOH) sessions are hidden unless
+    # AOH_SHOW_EXTERNAL_SESSIONS=1 — keeps the picker aoh-only by default.
+    if SHOW_EXTERNAL_SESSIONS:
+        if agent_key == "prime":
+            try:
+                externals = await _list_external_prime_sessions(working_dir)
+                ext_kind = "prime"
+            except Exception as e:
+                logger.debug(f"external prime list failed: {e}")
+                externals = []
+        elif agent_key == "opencode":
+            try:
+                externals = await _list_external_opencode_sessions(working_dir)
+                ext_kind = "opencode"
+            except Exception as e:
+                logger.debug(f"external opencode list failed: {e}")
+                externals = []
+        elif agent_key == "omp":
+            try:
+                externals = await _list_external_omp_sessions(working_dir)
+                ext_kind = "omp"
+            except Exception as e:
+                logger.debug(f"external omp list failed: {e}")
+                externals = []
     try:
         info = AVAILABLE_CLI_AGENTS.get(agent_key, {})
         agent_name = str(info.get("name", agent_name))
@@ -848,8 +874,10 @@ async def agent_start_callback_handler(update, context):  # type: ignore[no-unty
             )
             return
         if ext_agent in ("opencode", "omp"):
-            finder = _find_external_opencode if ext_agent == "opencode" else _find_external_omp
-            ext = await finder(ext_id)
+            if ext_agent == "opencode":
+                ext = await _find_external_opencode(ext_id, working_dir)
+            else:
+                ext = await _find_external_omp(ext_id)
             if ext is None:
                 await query.edit_message_text(
                     f"⚠️ 該外部 {ext_agent} session 已不存在，請改用 🆕 新增。",

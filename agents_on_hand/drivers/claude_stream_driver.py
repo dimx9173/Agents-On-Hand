@@ -31,6 +31,8 @@ class ClaudeStreamDriver(BaseDriver):
     async def start(self) -> bool:
         """Start the claude process with stream-json format."""
         try:
+            from ..config import runtime_env_with_extra_paths
+
             cmd_parts = self.command.split()
             self.process = await asyncio.create_subprocess_exec(
                 *cmd_parts,
@@ -38,6 +40,7 @@ class ClaudeStreamDriver(BaseDriver):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.working_dir),
+                env=runtime_env_with_extra_paths(),
                 preexec_fn=set_pdeathsig_and_pgrp,
             )
             self.is_running = True

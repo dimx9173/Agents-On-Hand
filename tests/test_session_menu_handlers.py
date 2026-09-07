@@ -40,7 +40,7 @@ async def test_sessions_command_no_sessions():
 async def test_sessions_command_with_sessions():
     from agents_on_hand.ui.session_menu import sessions_command
 
-    s1 = _mock_session("sess_a", "Claude", True, active=False, agent_key="claude")
+    s1 = _mock_session("sess_a", "Kimi Code", True, active=False, agent_key="kimi")
     s2 = _mock_session("sess_b", "Bash", False, active=False, agent_key="bash")
     with patch("agents_on_hand.ui.session_menu.session_manager") as sm:
         sm.list_user_sessions.return_value = [s1, s2]
@@ -56,7 +56,7 @@ async def test_sessions_command_with_sessions():
         txt = update.message.reply_text.call_args[0][0]
         # Step 1 = agent list: display names + running/total badges, not flat sessions.
         assert "管理 Session" in txt
-        assert "Claude Code" in txt and "Bash Shell" in txt
+        assert "Kimi Code" in txt and "Bash Shell" in txt
         assert "🟢1/1" in txt and "🟢0/1" in txt
         assert "sess_a" not in txt and "sess_b" not in txt
         kwargs = update.message.reply_text.call_args[1]
@@ -67,7 +67,7 @@ async def test_sessions_command_with_sessions():
             b for b in btns if b.callback_data and b.callback_data.startswith("sess:agent:")
         ]
         assert {b.callback_data for b in agent_btns} == {
-            "sess:agent:claude",
+            "sess:agent:kimi",
             "sess:agent:bash",
         }
         # No per-session switch buttons at step 1.
@@ -208,18 +208,13 @@ async def test_sess_prune_offline_agent_scoped():
 
 
 @pytest.mark.asyncio
-async def test_sess_agent_view_includes_external_sessions():
+async def test_sess_agent_view_excludes_external_sessions():
+    """`/aoh_sessions` agent view lists only AOH-spawned sessions — no 🟣 external rows."""
     from agents_on_hand.ui.session_menu import session_action_callback_handler
 
     oc = _mock_session("sess_oc1", "OpenCode", True, active=False, agent_key="opencode")
     oc.working_dir = Path("/tmp/ocproj")
-    with (
-        patch("agents_on_hand.ui.session_menu.session_manager") as sm,
-        patch(
-            "agents_on_hand.ui.session_menu._list_external_opencode_sessions",
-            new=AsyncMock(return_value=[{"id": "ses_ext1234", "title": "API 重構"}]),
-        ) as mock_ext,
-    ):
+    with patch("agents_on_hand.ui.session_menu.session_manager") as sm:
         sm.list_user_sessions.return_value = [oc]
         sm.get_active_session.return_value = None
         q = MagicMock()
@@ -231,31 +226,21 @@ async def test_sess_agent_view_includes_external_sessions():
         update.callback_query = q
         with patch("agents_on_hand.security.is_user_allowed", return_value=True):
             await session_action_callback_handler(update, MagicMock())
-    mock_ext.assert_awaited()
     q.edit_message_text.assert_called_once()
     txt = q.edit_message_text.call_args[0][0]
-    assert "🟣" in txt
-    assert "API 重構" in txt
-    assert "🟣 為外部 session" in txt
+    assert "🟣" not in txt  # no external session rows
+    assert "為外部 session" not in txt
+    assert "OpenCode" in txt  # AOH session itself still rendered
     btns = [
         b
         for row in q.edit_message_text.call_args[1]["reply_markup"].inline_keyboard
         for b in row
     ]
-    from agents_on_hand.callback_registry import resolve_external_info
-
     attach_btns = [
         b for b in btns if b.callback_data and b.callback_data.startswith("agent:attach_ext:")
     ]
-    assert attach_btns
-    assert all(len(b.callback_data.encode()) <= 64 for b in attach_btns)
-    assert any(
-        (info := resolve_external_info(b.callback_data.split(":", 2)[2]))
-        and info.get("ext_id") == "ses_ext1234"
-        and info.get("agent_key") == "opencode"
-        for b in attach_btns
-    )
-    assert any("🟣" in b.text for b in attach_btns)
+    assert not attach_btns
+    assert any(b.callback_data and b.callback_data.startswith("sess:kill:") for b in btns)
 
 
 @pytest.mark.asyncio

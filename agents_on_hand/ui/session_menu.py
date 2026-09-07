@@ -4,19 +4,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import RetryAfter
 from telegram.ext import ContextTypes
 
 from ..agent_session_cleaner import PurgeResult, purge_agent_session
-from ..ansi_cleaner import format_telegram_code_block
-from ..callback_registry import get_path_token, register_external_info, resolve_external_info
+from ..ansi_cleaner import break_markdown_fences, format_telegram_code_block
+from ..callback_registry import resolve_external_info
 from ..runtime import active_streamers, bot_app, create_streamer_for_session
 from ..security import restricted
 from ..session_manager import session_manager
-from ..ui.directory_browser import (
-    _list_external_omp_sessions,
-    _list_external_opencode_sessions,
-    _list_external_prime_sessions,
-)
 
 if TYPE_CHECKING:
     from ..session_manager import AgentSession
@@ -125,73 +121,13 @@ def _build_agent_list_view(
     return ("\n".join(lines), InlineKeyboardMarkup(keyboard))
 
 
-async def _list_external_sessions(
-    agent_key: str, agent_sessions: list["AgentSession"],
-) -> list[tuple[Path, dict]]:
-    """External (non-AOH) running sessions across the agent's working dirs."""
-    fns: dict[str, Any] = {
-        "opencode": _list_external_opencode_sessions,
-        "omp": _list_external_omp_sessions,
-        "prime": _list_external_prime_sessions,
-    }
-    list_fn = fns.get(agent_key)
-    if list_fn is None:
-        return []
-    dirs: list[Path] = []
-    seen_dirs: set[str] = set()
-    for s in agent_sessions:
-        key = str(s.working_dir)
-        if key not in seen_dirs:
-            seen_dirs.add(key)
-            dirs.append(s.working_dir)
-    out: list[tuple[Path, dict]] = []
-    for working_dir in dirs:
-        try:
-            found = await list_fn(working_dir)
-        except Exception as e:
-            logger.debug(f"external {agent_key} session list failed: {e}")
-            found = []
-        for ext in found:
-            if ext.get("id"):
-                out.append((working_dir, ext))
-    return out
 
-
-def _external_row(ext_kind: str, ext: dict) -> tuple[str, str] | None:
-    """Button label + text detail for one external session (mirrors _show_instance_picker)."""
-    ext_id = str(ext.get("id", ""))
-    if not ext_id:
-        return None
-    if ext_kind in ("opencode", "omp"):
-        title = str(ext.get("title", "") or "").strip().replace("\n", " ")
-        if len(title) > 24:
-            title = title[:24] + "…"
-        short = ext_id[4:12] if ext_id.startswith("ses_") else ext_id[:8]
-        label = f"🟣 {short}"
-        detail = f"• 🟣 `{short}`"
-        if title and not title.startswith("New session"):
-            label = f"{label} · {title}"
-            detail = f"{detail} · {title}"
-        return label, detail
-    first = str(ext.get("firstMessage", "") or "").strip().replace("\n", " ")
-    if len(first) > 22:
-        first = first[:22] + "…"
-    activity = str(ext.get("activity", "") or "")
-    act_badge = f" · {activity}" if activity and activity != "working" else ""
-    name = str(ext.get("sessionName", "") or "")
-    name_badge = f" · {name}" if name else ""
-    label = f"🟣 {ext_id[:8]}{act_badge}{name_badge}"
-    detail = f"• 🟣 `{ext_id[:8]}`{act_badge}{name_badge}"
-    if first:
-        label = f"{label} · {first}"
-        detail = f"{detail} · {first}"
-    return label, detail
 
 
 async def _build_agent_sessions_view(
     user_id: int, agent_key: str,
 ) -> tuple[str, InlineKeyboardMarkup]:
-    """Step-2 view: one agent's AOH sessions + external running sessions."""
+    """Step-2 view: one agent's AOH sessions."""
     sessions = session_manager.list_user_sessions(user_id)
     agent_sessions = [s for s in sessions if s.agent_key == agent_key]
     active_session = session_manager.get_active_session(user_id)
@@ -199,34 +135,11 @@ async def _build_agent_sessions_view(
     ordered = [s for s in agent_sessions if s.is_running] + [
         s for s in agent_sessions if not s.is_running
     ]
-    externals = await _list_external_sessions(agent_key, agent_sessions)
     lines = [f"🤖 *{agent_name}* · Sessions：", ""]
     keyboard: list[list[InlineKeyboardButton]] = []
     for s in ordered:
         lines.append(_session_label(s, active_session))
         keyboard.extend(_build_session_rows(s, active_session))
-    if externals:
-        lines.append("（🟣 為外部 session，點選即接回）")
-        for working_dir, ext in externals:
-            row = _external_row(agent_key, ext)
-            if row is None:
-                continue
-            label, detail = row
-            lines.append(detail)
-            # Telegram callback_data <= 64 bytes: short registry token, not raw id.
-            ext_token = register_external_info(str(ext.get("id", "")), agent_key, working_dir)
-            keyboard.append(
-                [
-                    InlineKeyboardButton(
-                        label[:58],
-                        callback_data=(f"agent:attach_ext:{ext_token}"),
-                    ),
-                    InlineKeyboardButton(
-                        "🗑️",
-                        callback_data=(f"sess:delete_ext:{ext_token}"),
-                    ),
-                ]
-            )
     has_offline = any(not s.is_running for s in agent_sessions)
     if has_offline:
         keyboard.append(
@@ -344,7 +257,7 @@ async def session_action_callback_handler(
                     summary = logs[-200:] if len(logs) > 200 else logs
                     if not summary:
                         summary = "(無文字內容)"
-                    alert_text = f"✅ *{bg_agent_name} 回覆完成*\n🆔 Session: `{bg_sess_id}`\n\n📝 *回覆摘要*:\n```\n{summary}\n```"
+                    alert_text = f"✅ *{bg_agent_name} 回覆完成*\n🆔 Session: `{bg_sess_id}`\n\n📝 *回覆摘要*:\n```\n{break_markdown_fences(summary)}\n```"
                     reply_markup = InlineKeyboardMarkup(
                         [
                             [
@@ -386,11 +299,15 @@ async def session_action_callback_handler(
         formatted_code = format_telegram_code_block(logs, max_chars=2500)
         chat_id = query.message.chat_id
         short_id = session_id.removeprefix("sess_")
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"🔄 *{session.agent_name}* · `{short_id}`\n📁 `{session.working_dir}`\n\n📄 *近 30 行*:\n{formatted_code}",
-            parse_mode="Markdown",
-        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"🔄 *{session.agent_name}* · `{short_id}`\n📁 `{session.working_dir}`\n\n📄 *近 30 行*:\n{formatted_code}",
+                parse_mode="Markdown",
+            )
+        except RetryAfter as e:
+            logger.warning(f"[TG_FLOOD] switch history send blocked {e.retry_after}s — skipping")
+            await query.answer(f"⚠️ Telegram 速率限制中（{e.retry_after}s），Session 已切換", show_alert=True)
         streamer = create_streamer_for_session(context.bot, chat_id, session)
         streamer.start()
         active_streamers[user_id] = streamer
@@ -400,10 +317,14 @@ async def session_action_callback_handler(
             return
         logs = session.get_last_n_lines(n=100)
         formatted_code = format_telegram_code_block(logs, max_chars=3700)
-        await query.message.reply_text(
-            f"📄 *Session Log (最後 100 行)* - `{session_id}`:\n{formatted_code}",
-            parse_mode="Markdown",
-        )
+        try:
+            await query.message.reply_text(
+                f"📄 *Session Log (最後 100 行)* - `{session_id}`:\n{formatted_code}",
+                parse_mode="Markdown",
+            )
+        except RetryAfter as e:
+            logger.warning(f"[TG_FLOOD] logs send blocked {e.retry_after}s — skipping")
+            await query.answer(f"⚠️ Telegram 速率限制中（{e.retry_after}s）", show_alert=True)
     elif action == "download":
         if not session or not session.log_file_path.exists():
             await query.message.reply_text("❌ Log 檔案不存在。")
@@ -489,6 +410,65 @@ async def session_action_callback_handler(
             f"🗑️ 已刪除 Session: `{session_id}`\n" + _purge_report(purge),
             parse_mode="Markdown",
         )
+        return
+
+    elif action == "restart":
+        sess, reason, probe = session_manager.restart_session(session_id)
+        if sess is None:
+            if reason == "not_found":
+                await query.message.reply_text("❌ 該 Session 已不存在。")
+            elif reason == "already_running":
+                await query.answer("ℹ️ 該 Session 仍在運行，請使用 ▶️ 切換。", show_alert=True)
+            elif reason == "sandbox":
+                await query.edit_message_text(
+                    "⛔ *無法 Resume*：工作目錄超出允許範圍。", parse_mode="Markdown"
+                )
+            else:
+                await query.message.reply_text("❌ 無法 Resume Session。")
+            return
+        chat_id = query.message.chat_id
+        short_id = session_id.removeprefix("sess_")
+        try:
+            await query.edit_message_text(
+                f"🔄 *正在 Resume {sess.agent_name}* · `{short_id}`\n📁 `{sess.working_dir}`\n\n⏳ 正在重連 Agent…",
+                parse_mode="Markdown",
+            )
+        except RetryAfter as e:
+            logger.warning(f"[TG_FLOOD] restart ack blocked {e.retry_after}s — continuing")
+        session_manager.set_active_session(user_id, session_id)
+        if user_id in active_streamers:
+            active_streamers[user_id].stop()
+            del active_streamers[user_id]
+        streamer = create_streamer_for_session(context.bot, chat_id, sess)
+        streamer.start()
+        active_streamers[user_id] = streamer
+
+        async def _finalize_resume() -> None:
+            ok = False
+            try:
+                if probe is not None:
+                    ok = bool(await asyncio.wait_for(asyncio.shield(probe), timeout=60.0))
+            except Exception as e:
+                logger.warning(f"[SESSION_RESTART] probe failed session={session_id}: {e}")
+            status = (
+                f"✅ *Resumed {sess.agent_name}* · `{short_id}`\n📁 `{sess.working_dir}`\n🔌 Driver: `{sess.active_driver_name}`"
+                if ok
+                else (
+                    f"❌ *Resume 失敗* · `{short_id}`\n📁 `{sess.working_dir}`\n\n"
+                    "Agent 進程無法啟動，請檢查 agent 安裝或先 🗑️ 刪除此 Session 再 `/aoh_new`。"
+                )
+            )
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=query.message.message_id,
+                    text=status,
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                logger.debug(f"[SESSION_RESTART] finalize edit failed: {e}")
+
+        asyncio.create_task(_finalize_resume())
         return
 
     elif action == "delete_ext":

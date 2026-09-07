@@ -28,6 +28,8 @@ class PTYDriver(BaseDriver):
     async def start(self) -> bool:
         """Spawn the process in a pseudo-terminal."""
         try:
+            from ..config import runtime_env_with_extra_paths
+
             self.working_dir.mkdir(parents=True, exist_ok=True)
             self.process = pexpect.spawn(
                 self.command,
@@ -36,6 +38,7 @@ class PTYDriver(BaseDriver):
                 echo=False,
                 dimensions=(30, 120),
                 preexec_fn=set_pdeathsig_and_pgrp,
+                env=runtime_env_with_extra_paths(),  # type: ignore[arg-type]
             )
             self.is_running = True
             loop = asyncio.get_running_loop()

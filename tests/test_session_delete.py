@@ -129,8 +129,8 @@ async def test_sess_delete_missing_session():
 
 @pytest.mark.asyncio
 async def test_sess_delete_ext_purges_via_command():
-    from agents_on_hand.ui.session_menu import session_action_callback_handler
     from agents_on_hand.callback_registry import register_external_info
+    from agents_on_hand.ui.session_menu import session_action_callback_handler
 
     token = register_external_info("ses_ext1234", "opencode", Path("/tmp/proj"))
     purge_ok = PurgeResult(True, "opencode-cli", "deleted", ["ses_ext1234"])

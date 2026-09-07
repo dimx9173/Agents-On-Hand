@@ -62,6 +62,9 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
 
 
 async def post_init(application: Application) -> None:
+    from .config import ensure_extra_paths
+
+    ensure_extra_paths(force=True)
     ensure_runtime_dirs()
     bot_commands = [
         BotCommand("aoh_new", "📂 開啟目錄選擇器與啟動 CLI Agent"),

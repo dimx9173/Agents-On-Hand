@@ -6,6 +6,7 @@ bitbucket.log
 .agents-on-hand/
 .claude/
 .sisyphus/
+.omo/
 
 
 # Byte-compiled / optimized / DLL files

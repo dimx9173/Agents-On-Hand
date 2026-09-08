@@ -313,6 +313,14 @@ class UnifiedStreamer:
             )
             asyncio.create_task(self._schedule_edit())
 
+        elif e_type == DriverEvent.ERROR:
+            content = str(getattr(event, "content", "") or "").strip()
+            logger.info(
+                f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type=ERROR chars={len(content)}"
+            )
+            if content:
+                asyncio.create_task(self._deliver_error(content))
+
         elif e_type in (DriverEvent.TURN_END, DriverEvent.EXIT):
             logger.info(
                 f"[AGENT->TG] session={getattr(self.session, 'session_id', '?')} type={e_type} is_final=True text={len(self.current_text)} thought={len(self.current_thought)} tools={self._tool_count}"
@@ -321,6 +329,19 @@ class UnifiedStreamer:
             self._dirty = True
             self._stop_typing()
             asyncio.create_task(self._schedule_edit())
+
+    async def _deliver_error(self, content: str):
+        """Send a driver-reported error to the chat as a standalone message.
+
+        Plain text (no parse_mode) so agent-provided details can never break
+        Telegram formatting or silently fail delivery.
+        """
+        if not self._is_active:
+            return
+        try:
+            await self.bot.send_message(chat_id=self.chat_id, text=content)
+        except Exception as e:
+            logger.warning(f"Error message delivery failed: {e}")
 
     def _check_repetition_loop(self) -> None:
         """Detect a degeneration loop (repeated ack sentence) and interrupt once."""

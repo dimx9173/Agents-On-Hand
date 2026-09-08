@@ -57,6 +57,50 @@ def extract_acp_text_delta(params: dict) -> str:
     return _extract_text_from_node(raw)
 
 
+def _describe_jsonrpc_error(exc: Exception) -> tuple[int | None, str]:
+    """Extract (code, detail text) from a RuntimeError wrapping a JSON-RPC error dict."""
+    args = getattr(exc, "args", ())
+    if args and isinstance(args[0], dict):
+        err = args[0]
+        code = err.get("code")
+        message = str(err.get("message", ""))
+        data = err.get("data")
+        detail = message
+        if isinstance(data, dict):
+            inner = data.get("details") or data.get("code") or ""
+            if inner:
+                detail = f"{message} ({inner})" if message else str(inner)
+        return code if isinstance(code, int) else None, detail
+    return None, str(exc)
+
+
+def format_prompt_error(exc: Exception) -> str:
+    """Turn an ACP prompt exception into a user-visible Telegram message.
+
+    Never swallow silently: every prompt failure must surface to the chat.
+    """
+    if isinstance(exc, asyncio.TimeoutError):
+        return (
+            "⚠️ ACP prompt 逾時（600s 無回應）。\n"
+            "Agent 可能仍在背景執行上一輪任務。\n"
+            "可改用 /aoh_esc 中斷，或稍後再問進度。"
+        )
+
+    code, detail = _describe_jsonrpc_error(exc)
+    lowered = detail.lower()
+    busy = (
+        code in (-32600, -32603)
+        and ("busy" in lowered or "already" in lowered or "in progress" in lowered)
+    ) or "agent_busy" in lowered or "already running" in lowered
+    if busy:
+        return (
+            "⚠️ Agent 忙碌中：上一輪任務仍在執行，這條訊息沒有被送進 agent。\n"
+            f"細節: {detail}\n"
+            "可用 /aoh_esc 中斷上一輪，或等待其完成後再送。"
+        )
+    return f"⚠️ ACP prompt 失敗: {detail or type(exc).__name__}"
+
+
 class ACPDriver(BaseDriver):
     """Protocol Driver implementing standard ACP (JSON-RPC 2.0 stdio)."""
 
@@ -167,14 +211,27 @@ class ACPDriver(BaseDriver):
         if self.client and self.is_running:
 
             async def _do_prompt():
+                error_text: str | None = None
                 try:
                     await self.client.prompt(text)
                 except Exception as e:
                     logger.error(f"Error in ACP prompt: {e}")
+                    error_text = format_prompt_error(e)
                 finally:
+                    if error_text:
+                        self.emit_event(DriverEvent(DriverEvent.ERROR, content=error_text))
                     self.emit_event(DriverEvent(DriverEvent.TURN_END))
 
             asyncio.create_task(_do_prompt())
+        else:
+            logger.warning("ACPDriver.send_prompt skipped: driver not running")
+            self.emit_event(
+                DriverEvent(
+                    DriverEvent.ERROR,
+                    content="⚠️ 訊息未送出：ACP Driver 未在運行（agent 進程可能已結束）。",
+                )
+            )
+            self.emit_event(DriverEvent(DriverEvent.TURN_END))
 
     def send_control_char(self, char: str):
         """Control chars are handled via session/cancel notification for ACP."""
@@ -194,9 +251,6 @@ class ACPDriver(BaseDriver):
 
     @property
     def pid(self) -> int | None:
-        """ACPDriver wraps its process in the ACPClient."""
-        proc = getattr(self.client, "process", None)
-        return getattr(proc, "pid", None)
         """ACPDriver wraps its process in the ACPClient."""
         proc = getattr(self.client, "process", None)
         return getattr(proc, "pid", None)

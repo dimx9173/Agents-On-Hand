@@ -19,6 +19,7 @@ class DriverEvent:
     TOOL_REQUEST = "tool_request"
     TOOL_RESULT = "tool_result"
     TURN_END = "turn_end"
+    ERROR = "error"
     EXIT = "exit"
 
     def __init__(
